@@ -455,28 +455,30 @@ class Britney(object):
         package as a dictionary.
         """
         sources = {}
-        filename = os.path.join(basedir, "source", "Sources.gz")
-        self.__log("Loading source packages from %s" % filename)
 
-        Packages = apt_pkg.TagFile(gzip.open(filename))
-        get_field = Packages.section.get
-        step = Packages.step
+        for dept in ["main", "contrib", "non-free"]:
+            filename = os.path.join(basedir, dept, "source", "Sources.gz")
+            self.__log("Loading source packages from %s" % filename)
 
-        while step():
-            pkg = get_field('Package')
-            ver = get_field('Version')
-            # There may be multiple versions of the source package
-            # (in unstable) if some architectures have out-of-date
-            # binaries.  We only ever consider the source with the
-            # largest version for migration.
-            if pkg in sources and apt_pkg.version_compare(sources[pkg][0], ver) > 0:
-                continue
-            sources[pkg] = [ver,
-                            get_field('Section'),
-                            [],
-                            get_field('Maintainer'),
-                            False,
-                           ]
+            Packages = apt_pkg.TagFile(gzip.open(filename))
+            get_field = Packages.section.get
+            step = Packages.step
+
+            while step():
+                pkg = get_field('Package')
+                ver = get_field('Version')
+                # There may be multiple versions of the source package
+                # (in unstable) if some architectures have out-of-date
+                # binaries.  We only ever consider the source with the
+                # largest version for migration.
+                if pkg in sources and apt_pkg.version_compare(sources[pkg][0], ver) > 0:
+                    continue
+                sources[pkg] = [ver,
+                                get_field('Section'),
+                                [],
+                                get_field('Maintainer'),
+                                False,
+                               ]
         return sources
 
     def read_binaries(self, basedir, distribution, arch):
@@ -507,87 +509,88 @@ class Britney(object):
         provides = {}
         sources = self.sources
 
-        filename = os.path.join(basedir, "binary-%s" % arch, "Packages.gz")
-        self.__log("Loading binary packages from %s" % filename)
+        for dept in ["main", "contrib", "non-free"]:
+            filename = os.path.join(basedir, "binary-%s" % arch, "Packages.gz")
+            self.__log("Loading binary packages from %s" % filename)
 
-        Packages = apt_pkg.TagFile(gzip.open(filename))
-        get_field = Packages.section.get
-        step = Packages.step
+            Packages = apt_pkg.TagFile(gzip.open(filename))
+            get_field = Packages.section.get
+            step = Packages.step
 
-        while step():
-            pkg = get_field('Package')
-            version = get_field('Version')
+            while step():
+                pkg = get_field('Package')
+                version = get_field('Version')
 
-            # There may be multiple versions of any arch:all packages
-            # (in unstable) if some architectures have out-of-date
-            # binaries.  We only ever consider the package with the
-            # largest version for migration.
-            if pkg in packages and apt_pkg.version_compare(packages[pkg][0], version) > 0:
-                continue
+                # There may be multiple versions of any arch:all packages
+                # (in unstable) if some architectures have out-of-date
+                # binaries.  We only ever consider the package with the
+                # largest version for migration.
+                if pkg in packages and apt_pkg.version_compare(packages[pkg][0], version) > 0:
+                    continue
 
-            # Merge Pre-Depends with Depends and Conflicts with
-            # Breaks. Britney is not interested in the "finer
-            # semantical differences" of these fields anyway.
-            pdeps = get_field('Pre-Depends')
-            deps = get_field('Depends')
-            if deps and pdeps:
-                deps = pdeps + ', ' + deps
-            elif pdeps:
-                deps = pdeps
+                # Merge Pre-Depends with Depends and Conflicts with
+                # Breaks. Britney is not interested in the "finer
+                # semantical differences" of these fields anyway.
+                pdeps = get_field('Pre-Depends')
+                deps = get_field('Depends')
+                if deps and pdeps:
+                    deps = pdeps + ', ' + deps
+                elif pdeps:
+                    deps = pdeps
 
-            final_conflicts_list = []
-            conflicts = get_field('Conflicts')
-            if conflicts:
-                final_conflicts_list.append(conflicts)
-            breaks = get_field('Breaks')
-            if breaks:
-                final_conflicts_list.append(breaks)
-            dpkg = [version,
-                    get_field('Section'),
-                    pkg,
-                    version,
-                    get_field('Architecture'),
-                    None, # Pre-depends - leave as None for the C-code
-                    deps,
-                    ', '.join(final_conflicts_list) or None,
-                    get_field('Provides'),
-                    [],
-                    [],
-                   ]
+                final_conflicts_list = []
+                conflicts = get_field('Conflicts')
+                if conflicts:
+                    final_conflicts_list.append(conflicts)
+                breaks = get_field('Breaks')
+                if breaks:
+                    final_conflicts_list.append(breaks)
+                dpkg = [version,
+                        get_field('Section'),
+                        pkg,
+                        version,
+                        get_field('Architecture'),
+                        None, # Pre-depends - leave as None for the C-code
+                        deps,
+                        ', '.join(final_conflicts_list) or None,
+                        get_field('Provides'),
+                        [],
+                        [],
+                       ]
 
-            # retrieve the name and the version of the source package
-            source = get_field('Source')
-            if source:
-                dpkg[SOURCE] = source.split(" ")[0]
-                if "(" in source:
-                    dpkg[SOURCEVER] = source[source.find("(")+1:source.find(")")]
+                # retrieve the name and the version of the source package
+                source = get_field('Source')
+                if source:
+                    dpkg[SOURCE] = source.split(" ")[0]
+                    if "(" in source:
+                        dpkg[SOURCEVER] = source[source.find("(")+1:source.find(")")]
 
-            # if the source package is available in the distribution, then register this binary package
-            if dpkg[SOURCE] in sources[distribution]:
-                pkg_arch = pkg + "/" + arch
-                if pkg_arch not in sources[distribution][dpkg[SOURCE]][BINARIES]:
-                    sources[distribution][dpkg[SOURCE]][BINARIES].append(pkg_arch)
-            # if the source package doesn't exist, create a fake one
-            else:
-                sources[distribution][dpkg[SOURCE]] = [dpkg[SOURCEVER], 'faux', [pkg + "/" + arch], None, True]
+                # if the source package is available in the distribution, then register this binary package
+                if dpkg[SOURCE] in sources[distribution]:
+                    pkg_arch = pkg + "/" + arch
+                    if pkg_arch not in sources[distribution][dpkg[SOURCE]][BINARIES]:
+                        sources[distribution][dpkg[SOURCE]][BINARIES].append(pkg_arch)
+                # if the source package doesn't exist, create a fake one
+                else:
+                    sources[distribution][dpkg[SOURCE]] = [dpkg[SOURCEVER], 'faux', [pkg + "/" + arch], None, True]
 
-            # register virtual packages and real packages that provide them
-            if dpkg[PROVIDES]:
-                parts = map(string.strip, dpkg[PROVIDES].split(","))
-                for p in parts:
-                    if p not in provides:
-                        provides[p] = []
-                    provides[p].append(pkg)
-                dpkg[PROVIDES] = parts
-            else: dpkg[PROVIDES] = []
+                # register virtual packages and real packages that provide them
+                if dpkg[PROVIDES]:
+                    parts = map(string.strip, dpkg[PROVIDES].split(","))
+                    for p in parts:
+                        if p not in provides:
+                            provides[p] = []
+                        provides[p].append(pkg)
+                    dpkg[PROVIDES] = parts
+                else: dpkg[PROVIDES] = []
 
-            # add the resulting dictionary to the package list
-            packages[pkg] = dpkg
+                # add the resulting dictionary to the package list
+                packages[pkg] = dpkg
 
-        # loop again on the list of packages to register reverse dependencies and conflicts
-        register_reverses = self.register_reverses
-        for pkg in packages:
-            register_reverses(pkg, packages, provides, check_doubles=False)
+            # loop again on the list of packages to register reverse dependencies and conflicts
+            register_reverses = self.register_reverses
+            for pkg in packages:
+                register_reverses(pkg, packages, provides, check_doubles=False)
 
         # return a tuple with the list of real and virtual packages
         return (packages, provides)
