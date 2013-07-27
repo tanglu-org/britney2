@@ -457,7 +457,7 @@ class Britney(object):
         sources = {}
 
         for comp in ["main", "contrib", "non-free"]:
-            filename = os.path.join(basedir, comp, "source", "Sources.gz")
+            filename = os.path.join(basedir, "dist", comp, "source", "Sources.gz")
             self.__log("Loading source packages from %s" % filename)
 
             Packages = apt_pkg.TagFile(gzip.open(filename))
@@ -510,7 +510,7 @@ class Britney(object):
         sources = self.sources
 
         for comp in ["main", "contrib", "non-free"]:
-            filename = os.path.join(basedir, comp, "binary-%s" % arch, "Packages.gz")
+            filename = os.path.join(basedir, "dist", comp, "binary-%s" % arch, "Packages.gz")
             self.__log("Loading binary packages from %s" % filename)
 
             Packages = apt_pkg.TagFile(gzip.open(filename))
