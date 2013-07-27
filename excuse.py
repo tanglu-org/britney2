@@ -20,7 +20,7 @@ import string
 
 class Excuse(object):
     """Excuse class
-    
+
     This class represents an update excuse, which is a detailed explanation
     of why a package can or cannot be updated in the testing distribution from
     a newer package in another distribution (like for example unstable).
@@ -37,7 +37,7 @@ class Excuse(object):
 
     def __init__(self, name):
         """Class constructor
-        
+
         This method initializes the excuse with the specified name and
         the default values.
         """
@@ -121,7 +121,7 @@ class Excuse(object):
 
     def html(self):
         """Render the excuse in HTML"""
-        lp_pkg = "https://launchpad.net/ubuntu/+source/%s" % self.name
+        lp_pkg = "http://packages.tanglu.org/%s" % self.name
         if self.ver[0] == "-":
             lp_old = self.ver[0]
         else:
