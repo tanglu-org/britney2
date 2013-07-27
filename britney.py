@@ -187,6 +187,7 @@ import string
 import time
 import optparse
 import urllib
+import gzip
 
 import apt_pkg
 
@@ -454,10 +455,10 @@ class Britney(object):
         package as a dictionary.
         """
         sources = {}
-        filename = os.path.join(basedir, "Sources")
+        filename = os.path.join(basedir, "source", "Sources.gz")
         self.__log("Loading source packages from %s" % filename)
 
-        Packages = apt_pkg.TagFile(open(filename))
+        Packages = apt_pkg.TagFile(gzip.open(filename))
         get_field = Packages.section.get
         step = Packages.step
 
@@ -506,10 +507,10 @@ class Britney(object):
         provides = {}
         sources = self.sources
 
-        filename = os.path.join(basedir, "Packages_%s" % arch)
+        filename = os.path.join(basedir, "binary-%s" % arch, "Packages.gz")
         self.__log("Loading binary packages from %s" % filename)
 
-        Packages = apt_pkg.TagFile(open(filename))
+        Packages = apt_pkg.TagFile(gzip.open(filename))
         get_field = Packages.section.get
         step = Packages.step
 
