@@ -220,13 +220,10 @@ create_uninst_report () {
 
 stats () {
   echo STATS:
-  if [ "$1" = "b1" ]; then
-    cp $UPDATE_OUT/update.EXCUSES_py $HTML/update_excuses.html
-    cp $UPDATE_OUT/update.OUTPUT_py $HTML/update_output.txt
-  else
-    cp $DATA/output/excuses.html $HTML/update_excuses.html
-    cp $DATA/output/output.txt $HTML/update_output.txt
-  fi
+
+  cp $B2_OUTPUT/excuses.html $HTML/update_excuses.html
+  cp $B2_OUTPUT/output.txt $HTML/update_output.txt
+
   gzip -9 < $HTML/update_excuses.html > $HTML/update_excuses.html.gz
   gzip -9 < $HTML/update_output.txt > $HTML/update_output.txt.gz
   mkdir -p $HTML/update_output/$YEAR
