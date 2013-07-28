@@ -70,9 +70,10 @@ exit_function () {
 eval $( dak admin config db-shell )
 
 suite_arches () {
-    echo "SELECT space_separated_list(arch)
-            FROM suite_arch_by_name
-            WHERE suite = '$1'" | psql -t -P "border=0"
+    echo "amd64 i386"
+    #echo "SELECT space_separated_list(arch)
+    #        FROM suite_arch_by_name
+    #        WHERE suite = '$1'" | psql -t -P "border=0"
 }
 
 if ! qoption allowdaklock; then
