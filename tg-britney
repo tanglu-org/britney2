@@ -43,9 +43,8 @@ DAK_STOP=$DAK_LOCKDIR/archive.stop
 HTML=/srv/ftp-master.tanglu.org/web/staging-report
 
 # Britney 2
-DATA_B2=$VAR/data
 CODE_B2=$BASE
-B2_OUTPUT=$DATA_B2/output
+B2_OUTPUT=$VAR/output
 B2_CONFIG=$CODE_B2/britney.conf
 B2_CONFIG_NOBREAKALL=$CODE_B2/britney_nobreakall.conf
 
@@ -94,7 +93,7 @@ urgencies () {
 }
 
 if option urgencies; then
-  urgencies $DATA_B2
+  urgencies $DATA
 fi
 
 pkg_lists () {
@@ -128,16 +127,8 @@ EOF
 
 if option pkglists; then
   echo PKGLISTS:
-  cd $DATA_B2
-  pkg_lists $DATA_B2
-fi
-
-if option sync_b2; then
-  rsync -ar $DATA/ $DATA_B2
-fi
-
-if option sync_b2_lite; then
-  lite_sync $DATA $DATA_B2
+  cd $DATA
+  pkg_lists $DATA
 fi
 
 b2_diff () {
@@ -229,8 +220,8 @@ stats () {
     cp $UPDATE_OUT/update.EXCUSES_py $HTML/update_excuses.html
     cp $UPDATE_OUT/update.OUTPUT_py $HTML/update_output.txt
   else
-    cp $DATA_B2/output/excuses.html $HTML/update_excuses.html
-    cp $DATA_B2/output/output.txt $HTML/update_output.txt
+    cp $DATA/output/excuses.html $HTML/update_excuses.html
+    cp $DATA/output/output.txt $HTML/update_output.txt
   fi
   gzip -9 < $HTML/update_excuses.html > $HTML/update_excuses.html.gz
   gzip -9 < $HTML/update_output.txt > $HTML/update_output.txt.gz
@@ -248,8 +239,8 @@ stats () {
     echo >&2 'Warning! Some -meta-faux package is uninstallable!'
   fi
 
-  create_ood_report $DATA_B2/stable stable_outdate.txt
-  create_ood_report $DATA_B2/testing testing_outdate.txt
+  create_ood_report $DATA/stable stable_outdate.txt
+  create_ood_report $DATA/testing testing_outdate.txt
 }
 
 if option stats_b1; then
