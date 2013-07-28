@@ -243,8 +243,8 @@ stats () {
     echo >&2 'Warning! Some -meta-faux package is uninstallable!'
   fi
 
-  create_ood_report $DATA/stable stable_outdate.txt
-  create_ood_report $DATA/testing testing_outdate.txt
+  #create_ood_report $DATA/stable stable_outdate.txt
+  #create_ood_report $DATA/testing testing_outdate.txt
 }
 
 if option stats_b1; then
