@@ -27,14 +27,14 @@ DAK_LOCKDIR=/srv/dak/lock
 FTP_MIRROR=/srv/dak/ftp
 
 VAR=$BASE/var
-HEIDI=$BASE/Heidi
-INPUT=$BASE/input
+HEIDI=$VAR/Heidi
+INPUT=$VAR/input
 
 DATA=$VAR/data
 LOCKDIR=$VAR/lock
 HEIDI_SET=$HEIDI/set
 UPDATE_OUT=$DATA/update_out
-URGENCIES=$INPUT/urgencies
+URGENCIES=$VAR/urgencies
 
 LOCK=$LOCKDIR/britney.lock
 DAK_LOCK=$DAK_LOCKDIR/daily.lock
