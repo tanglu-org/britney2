@@ -43,8 +43,8 @@ DAK_STOP=$DAK_LOCKDIR/archive.stop
 HTML=/srv/ftp-master.tanglu.org/web/staging-report
 
 # Britney 2
-DATA_B2=$VAR/data-b2
-CODE_B2=$BASE/code/b2
+DATA_B2=$VAR/data
+CODE_B2=$BASE
 B2_OUTPUT=$DATA_B2/output
 B2_CONFIG=$CODE_B2/britney.conf
 B2_CONFIG_NOBREAKALL=$CODE_B2/britney_nobreakall.conf
@@ -133,13 +133,6 @@ fi
 
 if option sync_b2; then
   rsync -ar $DATA/ $DATA_B2
-fi
-
-# Give options to run a b2 from scratch after b1 has finished
-if option pkglists_b2; then
-  echo PKGLISTS_B2:
-  cd $DATA_B2
-  pkg_lists $DATA_B2
 fi
 
 if option sync_b2_lite; then
