@@ -242,7 +242,7 @@ stats () {
   # TODO: {stable,unstable}_uninst.txt -- needs support in b2, talk to Fabio
   # TODO: this creates uninstallability reports against b2 results, not b1's
   create_uninst_report $B2_CONFIG testing_uninst.txt
-  create_uninst_report $B2_CONFIG_NOBREAKALL testing_uninst_full.txt
+  #create_uninst_report $B2_CONFIG_NOBREAKALL testing_uninst_full.txt
 
   if grep -q -e '-meta-faux' $HTML/testing_uninst.txt; then
     echo >&2 'Warning! Some -meta-faux package is uninstallable!'
