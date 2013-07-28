@@ -2,9 +2,11 @@
 set -e
 
 BASE=/var/archive-kit/britney2
+# some tools use relative paths, so we *need* to cd
+cd $BASE
 
-$BASE/tg-britney pkglists
-$BASE/tg-britney urgencies
-$BASE/tg-britney run
-$BASE/tg-britney save
-$BASE/tg-britney stats
+./tg-britney pkglists
+./tg-britney urgencies
+./tg-britney run
+./tg-britney save
+./tg-britney stats
