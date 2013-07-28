@@ -177,6 +177,10 @@ if option b2_diff; then
     b2_diff
 fi
 
+dak_import () {
+  /srv/dak/scripts/tanglu/import_dataset.sh
+}
+
 save () {
   cd $BASE
   echo RESULTS:
