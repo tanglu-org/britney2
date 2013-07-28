@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+BASE=/var/archive-kit/britney2
+
+$BASE/tg-britney pkglists
+$BASE/tg-britney urgencies
+$BASE/tg-britney run
+$BASE/tg-britney save
+$BASE/tg-britney stats
