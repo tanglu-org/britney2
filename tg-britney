@@ -40,7 +40,7 @@ LOCK=$LOCKDIR/britney.lock
 DAK_LOCK=$DAK_LOCKDIR/daily.lock
 DAK_STOP=$DAK_LOCKDIR/archive.stop
 
-HTML=/srv/ftp-master.tanglu.org/web/staging-report
+HTML=/srv/qa.tanglu.org/staging-report
 
 # Britney 2
 CODE_B2=$BASE
