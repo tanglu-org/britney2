@@ -56,12 +56,13 @@ class AutoPackageTest(object):
         with open(self.rc_path, "w") as rc_file:
             home = os.path.expanduser("~")
             print(dedent("""\
+                release: %s
                 aptroot: ~/.chdist/%s-proposed-amd64/
                 apturi: file:%s/mirror/ubuntu
                 components: main restricted universe multiverse
-                rsync_host: rsync://10.189.74.2/adt/
+                rsync_host: rsync://tachash.ubuntu-ci/adt/
                 datadir: ~/proposed-migration/autopkgtest/data""" %
-                (self.series, home)), file=rc_file)
+                (self.series, self.series, home)), file=rc_file)
 
     @property
     def _request_path(self):
@@ -111,9 +112,8 @@ class AutoPackageTest(object):
                 pass
         for src in self.pkglist:
             all_vers = sorted(self.pkglist[src], cmp=apt_pkg.version_compare)
-            latest_ver = all_vers[-1]
-            status = self.pkglist[src][latest_ver]["status"]
             for ver in self.pkglist[src]:
+                status = self.pkglist[src][ver]["status"]
                 for trigsrc, trigver in \
                         self.pkglist[src][ver]["causes"].items():
                     self.pkgcauses[trigsrc][trigver].append((status, src, ver))
@@ -128,7 +128,10 @@ class AutoPackageTest(object):
         command.extend(args)
         subprocess.check_call(command)
 
-    def request(self, packages):
+    def request(self, packages, excludes=None):
+        if excludes is None:
+            excludes = []
+
         self._ensure_rc_file()
         request_path = self._request_path
         if os.path.exists(request_path):
@@ -140,6 +143,22 @@ class AutoPackageTest(object):
                 print("%s %s" % (src, ver), file=request_file)
             request_file.flush()
             self._adt_britney("request", "-O", request_path, request_file.name)
+
+        # Remove packages that have been identified as invalid candidates for
+        # testing from the request file i.e run_autopkgtest = False
+        with open(request_path, 'r') as request_file:
+            lines = request_file.readlines()
+        with open(request_path, 'w') as request_file:
+            for line in lines:
+                src = line.split()[0]
+                if src not in excludes:
+                    request_file.write(line)
+                else:
+                    if self.britney.options.verbose:
+                        print("I: [%s] - Requested autopkgtest for %s but "
+                              "run_autopkgtest set to False" %
+                              (time.asctime(), src))
+
         for linebits in self._parse(request_path):
             # Make sure that there's an entry in pkgcauses for each new
             # request, so that results() gives useful information without

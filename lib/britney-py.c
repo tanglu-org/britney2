@@ -85,6 +85,7 @@ static PyObject *dpkgpackages_add_binary(dpkgpackages *self, PyObject *args) {
     pkg->package = strdup(pkg_name);
     pkg->priority = 0;
     pkg->details    = NULL;
+    pkg->depends[1] = NULL;
     pkg->depends[2] = NULL;
     pkg->depends[3] = NULL;
 
@@ -107,14 +108,14 @@ static PyObject *dpkgpackages_add_binary(dpkgpackages *self, PyObject *args) {
     pyString = PyList_GetItem(value, 5);
     if (pyString == NULL) return NULL;
     if (pyString != Py_None) {
-        pkg->depends[0] = read_dep_andor(PyString_AsString(pyString));
-    } else pkg->depends[0] = NULL;
+        pkg->multiarch = PyString_AsString(pyString);
+    } else pkg->multiarch = NULL;
 
     pyString = PyList_GetItem(value, 6);
     if (pyString == NULL) return NULL;
     if (pyString != Py_None) {
-        pkg->depends[1] = read_dep_andor(PyString_AsString(pyString));
-    } else pkg->depends[1] = NULL;
+        pkg->depends[0] = read_dep_andor(PyString_AsString(pyString));
+    } else pkg->depends[0] = NULL;
 
     pyString = PyList_GetItem(value, 7);
     if (pyString == NULL) return NULL;
@@ -204,7 +205,7 @@ static PyObject *build_system(PyObject *self, PyObject *args) {
        # SOURCE = 2
        # SOURCEVER = 3
        # ARCHITECTURE = 4
-       # PREDEPENDS = 5
+       # MULTIARCH = 5
        # DEPENDS = 6
        # CONFLICTS = 7
        # PROVIDES = 8
@@ -223,6 +224,7 @@ static PyObject *build_system(PyObject *self, PyObject *args) {
         pkg->package = strdup(PyString_AsString(key));
         pkg->priority = 0;
         pkg->details    = NULL;
+        pkg->depends[1] = NULL;
         pkg->depends[2] = NULL;
         pkg->depends[3] = NULL;
 
@@ -245,14 +247,14 @@ static PyObject *build_system(PyObject *self, PyObject *args) {
         pyString = PyList_GetItem(value, 5);
         if (pyString == NULL) continue;
         if (pyString != Py_None) {
-            pkg->depends[0] = read_dep_andor(PyString_AsString(pyString));
-        } else pkg->depends[0] = NULL;
+            pkg->multiarch = PyString_AsString(pyString);
+        } else pkg->multiarch = NULL;
 
         pyString = PyList_GetItem(value, 6);
         if (pyString == NULL) continue;
         if (pyString != Py_None) {
-            pkg->depends[1] = read_dep_andor(PyString_AsString(pyString));
-        } else pkg->depends[1] = NULL;
+            pkg->depends[0] = read_dep_andor(PyString_AsString(pyString));
+        } else pkg->depends[0] = NULL;
 
         pyString = PyList_GetItem(value, 7);
         if (pyString == NULL) continue;
