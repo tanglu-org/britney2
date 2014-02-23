@@ -268,7 +268,7 @@ fi
 if option archivedata; then
   echo ARCHIVE:
   cd $VAR
-  tar czf data_bkup/data-$(date +"%Y.%m.%d").tgz data/{staging,bartholomea
+  tar czf data_bkup/data-$(date +"%Y.%m.%d").tgz data/{staging,bartholomea}
 fi
 
 echo -n "Finished at: "; date -uR
