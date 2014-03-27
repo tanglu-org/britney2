@@ -97,7 +97,7 @@ if option urgencies; then
 fi
 
 pkg_lists () {
-  for suite in staging aequorea; do
+  for suite in staging bartholomea; do
       suite_dir=$FTP_MIRROR/dists/$suite
       gzip -t $suite_dir/{main,contrib,non-free}/source/Sources.gz
       zcat $suite_dir/{main,contrib,non-free}/source/Sources.gz >$1/$suite/Sources
@@ -268,7 +268,7 @@ fi
 if option archivedata; then
   echo ARCHIVE:
   cd $VAR
-  tar czf data_bkup/data-$(date +"%Y.%m.%d").tgz data/{staging,aequorea}
+  tar czf data_bkup/data-$(date +"%Y.%m.%d").tgz data/{staging,bartholomea
 fi
 
 echo -n "Finished at: "; date -uR
