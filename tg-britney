@@ -34,7 +34,7 @@ DATA=$VAR/data
 LOCKDIR=$VAR/lock
 HEIDI_SET=$HEIDI/set
 UPDATE_OUT=$DATA/update_out
-URGENCIES=$VAR/urgencies
+URGENCIES=$INPUT/urgencies
 
 LOCK=$LOCKDIR/britney.lock
 DAK_LOCK=$DAK_LOCKDIR/daily.lock
