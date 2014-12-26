@@ -121,17 +121,17 @@ class Excuse(object):
 
     def html(self):
         """Render the excuse in HTML"""
-        lp_pkg = "http://packages.tanglu.org/%s" % self.name
+        lp_pkg = "http://packages.tanglu.org/source/%s" % self.name
         if self.ver[0] == "-":
             lp_old = self.ver[0]
         else:
-            lp_old = "<a href=\"%s/%s\">%s</a>" % (
-                lp_pkg, self.ver[0], self.ver[0])
+            lp_old = "<a href=\"http://buildd.tanglu.org/source/default/%s/%s/\">%s</a>" % (
+                self.name, self.ver[0], self.ver[0])
         if self.ver[1] == "-":
             lp_new = self.ver[1]
         else:
-            lp_new = "<a href=\"%s/%s\">%s</a>" % (
-                lp_pkg, self.ver[1], self.ver[1])
+            lp_new = "<a href=\"http://buildd.tanglu.org/source/default/%s/%s/\">%s</a>" % (
+                self.name, self.ver[1], self.ver[1])
         res = (
             "<a id=\"%s\" name=\"%s\" href=\"%s\">%s</a> (%s to %s)\n<ul>\n" %
             (self.name, self.name, lp_pkg, self.name, lp_old, lp_new))

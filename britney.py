@@ -1445,7 +1445,7 @@ class Britney(object):
                     base = 'testing'
                 else:
                     base = 'stable'
-                text = "Not yet built on <a href=\"http://packages.tanglu.org/%s\" target=\"_blank\">%s</a> (relative to testing)" % (urllib.quote(src), arch)
+                text = "Not yet built on <a href=\"http://packages.tanglu.org/source/%s\" target=\"_blank\">%s</a> (relative to testing)" % (urllib.quote(src), arch)
 
                 if arch in self.options.outofsync_arches.split():
                     text = text + " (but %s isn't keeping up, so never mind)" % (arch)
