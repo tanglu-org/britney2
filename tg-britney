@@ -242,6 +242,9 @@ stats () {
 
   #create_ood_report $DATA/stable stable_outdate.txt
   #create_ood_report $DATA/testing testing_outdate.txt
+
+  # create pretty output for qa.tanglu.org
+  rapidumo --refresh-page migrations
 }
 
 if option stats_b1; then
