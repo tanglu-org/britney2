@@ -17,6 +17,9 @@ option () {
     return 1
 }
 
+# Suite
+SUITE=dasyatis
+
 # DATE
 NOW=`date +"%Y%m%d%H%M%S" -u`
 YEAR=`date +"%Y" -u`
@@ -159,7 +162,7 @@ b2_diff_with_mail () {
 }
 
 run_b2 () {
-  $CODE_B2/britney.py -c $B2_CONFIG --control-files -v
+  $CODE_B2/britney.py -c $B2_CONFIG --control-files -v --suite=$SUITE
 }
 
 if option run; then
@@ -178,7 +181,9 @@ if option b2_diff; then
 fi
 
 dak_import () {
-  /srv/dak/scripts/tanglu/import_dataset.sh
+  # FIXME: Temporarily disable dak-import
+  #/srv/dak/scripts/tanglu/import_dataset.sh
+  echo "Nope."
 }
 
 save () {
@@ -213,7 +218,7 @@ if option dak_import; then
 fi
 
 create_uninst_report () {
-    $CODE_B2/britney.py -c $1 --print-uninst >$HTML/$2.new
+    $CODE_B2/britney.py -c $1 --print-uninst >$HTML/$2.new --suite=$SUITE
     echo -e "\n# Generated: `date -uR`" >>$HTML/$2.new
     mv $HTML/$2.new $HTML/$2
 }
