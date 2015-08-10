@@ -135,7 +135,7 @@ class Excuse(object):
 
     def html(self):
         """Render the excuse in HTML"""
-        lp_pkg = "http://packages.tanglu.org/source/%s" % self.name.split("/")[0])
+        lp_pkg = "http://packages.tanglu.org/source/%s" % (self.name.split("/")[0])
         if self.ver[0] == "-":
             lp_old = self.ver[0]
         else:
