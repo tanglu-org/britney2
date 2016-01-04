@@ -27,7 +27,7 @@ YEAR=`date +"%Y" -u`
 # Dirs:
 BASE=/var/archive-kit/britney2
 DAK_LOCKDIR=/srv/dak/lock
-FTP_MIRROR=/srv/dak/ftp
+FTP_MIRROR=/srv/dak/ftp/tanglu
 
 VAR=$BASE/var
 HEIDI=$VAR/Heidi
