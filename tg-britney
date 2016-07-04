@@ -68,8 +68,6 @@ exit_function () {
     rm -f $LOCK
 }
 
-eval $( dak admin config db-shell )
-
 if ! qoption allowdaklock; then
 	while [ -f $DAK_LOCK ]; do
 		echo `date` $DAK_LOCK exists.  Sleeping in 10 more minutes.
@@ -93,7 +91,7 @@ fi
 
 if option run; then
   echo RUN:
-  $CODE_B2/britney.py -c $B2_CONFIG --control-files -v --series=$SUITE
+  $CODE_B2/britney.py -c $B2_CONFIG -v
 fi
 
 dak_import () {
