@@ -80,7 +80,7 @@ urgencies () {
   cd $BASE
   for u in $URGENCIES/install-urgencies-*; do
     [ -e "$u" ] || continue
-    cat "$u" >> $1/staging/Urgency # XXX I'd rather not have this in $DATA --dato
+    cat "$u" >> $1/state/age-policy-urgencies
     rm "$u"
   done
 }
@@ -126,7 +126,7 @@ if option dak_import; then
 fi
 
 create_uninst_report () {
-    $CODE_B2/britney.py -c $1 --print-uninst >$HTML/$2.new --series=$SUITE
+    $CODE_B2/britney.py -c $1 --print-uninst >$HTML/$2.new
     echo -e "\n# Generated: `date -uR`" >>$HTML/$2.new
     mv $HTML/$2.new $HTML/$2
 }
