@@ -5,8 +5,6 @@ BASE=/var/archive-kit/britney2
 # some tools use relative paths, so we *need* to cd
 cd $BASE
 
-./tg-britney pkglists
 ./tg-britney urgencies
-./tg-britney run
-./tg-britney save
+./tg-britney run save
 ./tg-britney stats

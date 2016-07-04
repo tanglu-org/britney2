@@ -49,7 +49,6 @@ HTML=/srv/qa.tanglu.org/staging-report
 CODE_B2=$BASE
 B2_OUTPUT=$VAR/output/$SUITE
 B2_CONFIG=$CODE_B2/britney.conf
-B2_CONFIG_NOBREAKALL=$CODE_B2/britney_nobreakall.conf
 
 if [ -f $DAK_STOP ]; then
   echo "$DAK_STOP exists, not running"
@@ -70,13 +69,6 @@ exit_function () {
 }
 
 eval $( dak admin config db-shell )
-
-suite_arches () {
-    echo "amd64 i386"
-    #echo "SELECT space_separated_list(arch)
-    #        FROM suite_arch_by_name
-    #        WHERE suite = '$1'" | psql -t -P "border=0"
-}
 
 if ! qoption allowdaklock; then
 	while [ -f $DAK_LOCK ]; do
@@ -99,85 +91,9 @@ if option urgencies; then
   urgencies $DATA
 fi
 
-pkg_lists () {
-  for suite in staging dasyatis; do
-      suite_dir=$FTP_MIRROR/dists/$suite
-      gzip -t $suite_dir/{main,contrib,non-free}/source/Sources.gz
-      zcat $suite_dir/{main,contrib,non-free}/source/Sources.gz >$1/$suite/Sources
-      for arch in `suite_arches $suite`; do
-          gzip -t $suite_dir/{main,contrib,non-free}/binary-$arch/Packages.gz
-          zcat $suite_dir/{main,contrib,non-free}/binary-$arch/Packages.gz >$1/$suite/Packages_$arch
-          for di_pkg_file in $suite_dir/{main,contrib,non-free}/debian-installer/binary-$arch/Packages.gz; do
-              if [ -f $di_pkg_file ]; then
-                  gzip -t $di_pkg_file
-                  zcat $di_pkg_file >>$1/$suite/Packages_$arch
-              fi
-          done
-      done
-  done
-}
-
-lite_sync () {
-  cat <<EOF | rsync -a --files-from=- $1 $2
-testing/Dates
-testing/BugsV
-testing/Urgency
-unstable/BugsV
-unstable/Hints
-EOF
-
-}
-
-if option pkglists; then
-  echo PKGLISTS:
-  cd $DATA
-  pkg_lists $DATA
-fi
-
-b2_diff () {
-    tmp_dir=`mktemp -d`
-    master="b2"
-    [ "$master" = "b1" ] && secondary="b2" || secondary="b1"
-    (cd $tmp_dir
-
-    sort $B2_OUTPUT/HeidiResult >HeidiResult_b2
-
-    sed -e '/^<p>Generated: /d' $B2_OUTPUT/excuses.html >excuses_b2.html
-
-    touch -m -r $B2_OUTPUT/HeidiResult HeidiResult_b2
-
-    touch -m -r $B2_OUTPUT/excuses.html excuses_b2.html
-
-    # NB: If you remove the "head" below, add a "|| true"; otherwise
-    # set -e may not allow the HeidiResult diff to execute.
-    diff -u excuses_${master}.html excuses_${secondary}.html | head -n 1000
-    diff -u HeidiResult_${master} HeidiResult_${secondary} | head -n 1000)
-    rm -rf $tmp_dir
-}
-
-b2_diff_with_mail () {
-  b2_diff
-  b2_diff | ifne mail -s "britney2 diff `date -u +'%Y-%m-%d %H:%M'`" \
-    -a "Reply-To: mak@debian.org" mak@debian.org
-}
-
-run_b2 () {
-  $CODE_B2/britney.py -c $B2_CONFIG --control-files -v --series=$SUITE
-}
-
 if option run; then
   echo RUN:
-  run_b2
-fi
-
-if option run_b2; then
-  echo RUN_B2:
-  run_b2
-  b2_diff_with_mail
-fi
-
-if option b2_diff; then
-    b2_diff
+  $CODE_B2/britney.py -c $B2_CONFIG --control-files -v --series=$SUITE
 fi
 
 dak_import () {
@@ -201,10 +117,6 @@ save () {
     ln -sf `basename $HEIDI_FILENAME` $HEIDI_CURRENT
   fi
   dak_import
-  # update the release mirror on ries
-  # printf "Updating DD-accessible mirror..."
-  # ssh -T release-sync-push || true
-  # printf " done\n"
 }
 
 if option save || option save_b2; then
@@ -243,16 +155,10 @@ stats () {
     echo >&2 'Warning! Some -meta-faux package is uninstallable!'
   fi
 
-  #create_ood_report $DATA/stable stable_outdate.txt
-  #create_ood_report $DATA/testing testing_outdate.txt
-
   # create pretty output for qa.tanglu.org
   rapidumo --refresh-page migrations
 }
 
-if option stats_b1; then
-  stats b1
-fi
 if option stats || option stats_b2; then
   stats b2
 fi
@@ -263,18 +169,6 @@ if option summary; then
   TERM=vt100 lynx -nolist -dump $HTML/update_excuses.html | sed -n 's/^ *[^ ] *[^ ]*out of date on \([^ ]*\): .*$/\1/p' | sort | uniq -c | sort -n
   echo "Uninstallables holding up testing:"
   sed < $HTML/update_excuses.html -n 's/^ *<li>[^ ]* (\([^, ]*\),.*) uninstallable.*$/\1/p' | sort | uniq -c | sort -n
-  #echo "wanna-build stats:"
-  #for a in alpha arm hppa hurd-i386 i386 ia64 m68k mips mipsel powerpc s390 sparc; do
-  #  printf "  %-12s " "$a:"
-  #  /srv/wanna-build/bin/wanna-build-statistics --database=$a/build-db |
-  #    grep "if also counting" || echo "-"
-  #done
-fi
-
-if option archivedata; then
-  echo ARCHIVE:
-  cd $VAR
-  tar czf data_bkup/data-$(date +"%Y.%m.%d").tgz data/{staging,dasyatis}
 fi
 
 echo -n "Finished at: "; date -uR
