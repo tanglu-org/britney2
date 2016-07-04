@@ -14,8 +14,10 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
-from functools import partial
+from __future__ import print_function
+
 import os
+from collections import deque
 
 from installability.tester import InstallabilityTester
 from britney_util import (ifilter_only, iter_except)
@@ -43,8 +45,8 @@ class InstallabilitySolver(InstallabilityTester):
           - NB: arch:all packages are "re-mapped" to given architecture.
             (simplifies caches and dependency checking)
         """
-        InstallabilityTester.__init__(self, universe, revuniverse, testing,
-                                      broken, essentials, safe_set, eqv_table)
+        super().__init__(universe, revuniverse, testing,
+                         broken, essentials, safe_set, eqv_table)
 
 
     def solve_groups(self, groups):
@@ -53,7 +55,7 @@ class InstallabilitySolver(InstallabilityTester):
         revuniverse = self._revuniverse
         result = []
         emitted = set()
-        check = set()
+        queue = deque()
         order = {}
         ptable = {}
         key2item = {}
@@ -106,7 +108,7 @@ class InstallabilitySolver(InstallabilityTester):
                         # "Self-conflicts" => ignore
                         continue
                     if debug_solver and other not in order[key]['before']:
-                        print "N: Conflict induced order: %s before %s" % (key, other)
+                        print("N: Conflict induced order: %s before %s" % (key, other))
                     order[key]['before'].add(other)
                     order[other]['after'].add(key)
 
@@ -125,7 +127,7 @@ class InstallabilitySolver(InstallabilityTester):
                                 # "Self-dependency" => ignore
                                 continue
                             if debug_solver and other not in order[key]['after']:
-                                print "N: Removal induced order: %s before %s" % (key, other)
+                                print("N: Removal induced order: %s before %s" % (key, other))
                             order[key]['after'].add(other)
                             order[other]['before'].add(key)
 
@@ -162,13 +164,13 @@ class InstallabilitySolver(InstallabilityTester):
 
                     for other in (other_adds - other_rms):
                         if debug_solver and other != key and other not in order[key]['after']:
-                            print "N: Dependency induced order (add): %s before %s" % (key, other)
+                            print("N: Dependency induced order (add): %s before %s" % (key, other))
                         order[key]['after'].add(other)
                         order[other]['before'].add(key)
 
                     for other in (other_rms - other_adds):
                         if debug_solver and other != key and other not in order[key]['before']:
-                            print "N: Dependency induced order (remove): %s before %s" % (key, other)
+                            print("N: Dependency induced order (remove): %s before %s" % (key, other))
                         order[key]['before'].add(other)
                         order[other]['after'].add(key)
 
@@ -208,7 +210,7 @@ class InstallabilitySolver(InstallabilityTester):
                     merged[n] = scc_id
                     del order[n]
                 if debug_solver:
-                    print "N: SCC: %s -- %s" % (scc_id, str(sorted(com)))
+                    print("N: SCC: %s -- %s" % (scc_id, str(sorted(com))))
 
         for com in comps:
             node = com[0]
@@ -223,38 +225,42 @@ class InstallabilitySolver(InstallabilityTester):
 
 
         if debug_solver:
-            print "N: -- PARTIAL ORDER --"
+            print("N: -- PARTIAL ORDER --")
 
+        initial_round = []
         for com in sorted(order):
             if debug_solver and order[com]['before']:
-                print "N: %s <= %s" % (com, str(sorted(order[com]['before'])))
+                print("N: %s <= %s" % (com, str(sorted(order[com]['before']))))
             if not order[com]['after']:
                 # This component can be scheduled immediately, add it
-                # to "check"
-                check.add(com)
+                # to the queue
+                initial_round.append(com)
             elif debug_solver:
-                print "N: %s >= %s" % (com, str(sorted(order[com]['after'])))
+                print("N: %s >= %s" % (com, str(sorted(order[com]['after']))))
+
+        queue.extend(sorted(initial_round, key=len))
+        del initial_round
 
         if debug_solver:
-            print "N: -- END PARTIAL ORDER --"
-            print "N: -- LINEARIZED ORDER --"
+            print("N: -- END PARTIAL ORDER --")
+            print("N: -- LINEARIZED ORDER --")
 
-        for cur in iter_except(check.pop, KeyError):
-            if order[cur]['after'] <= emitted:
+        for cur in iter_except(queue.popleft, IndexError):
+            if order[cur]['after'] <= emitted and cur not in emitted:
                 # This item is ready to be emitted right now
                 if debug_solver:
-                    print "N: %s -- %s" % (cur, sorted(scc[cur]))
+                    print("N: %s -- %s" % (cur, sorted(scc[cur])))
                 emitted.add(cur)
                 result.append([key2item[x] for x in scc[cur]])
                 if order[cur]['before']:
                     # There are components that come after this one.
-                    # Add it to "check":
+                    # Add it to queue:
                     # - if it is ready, it will be emitted.
                     # - else, it will be dropped and re-added later.
-                    check.update(order[cur]['before'] - emitted)
+                    queue.extend(sorted(order[cur]['before'] - emitted, key=len))
 
         if debug_solver:
-            print "N: -- END LINEARIZED ORDER --"
+            print("N: -- END LINEARIZED ORDER --")
 
         return result
 
@@ -301,8 +307,8 @@ class InstallabilitySolver(InstallabilityTester):
         return result
 
     def _dump_groups(self, groups):
-        print "N: === Groups ==="
+        print("N: === Groups ===")
         for (item, adds, rms) in groups:
-            print "N: %s =>  A: %s, R: %s" % (str(item), str(adds), str(rms))
-        print "N: === END Groups ==="
+            print("N: %s =>  A: %s, R: %s" % (str(item), str(adds), str(rms)))
+        print("N: === END Groups ===")
 

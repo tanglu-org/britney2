@@ -21,50 +21,20 @@
 # GNU General Public License for more details.
 
 
-import apt_pkg
 from functools import partial
 from datetime import datetime
-from itertools import chain, ifilter, ifilterfalse, izip, repeat
+from itertools import filterfalse
 import os
-import re
 import time
 import yaml
+import errno
 
 from migrationitem import MigrationItem, UnversionnedMigrationItem
 
 from consts import (VERSION, BINARIES, PROVIDES, DEPENDS, CONFLICTS,
-                    RDEPENDS, RCONFLICTS, ARCHITECTURE, SECTION,
-                    SOURCE, SOURCEVER, MAINTAINER, MULTIARCH,
+                    ARCHITECTURE, SECTION,
+                    SOURCE, MAINTAINER, MULTIARCH,
                     ESSENTIAL)
-
-binnmu_re = re.compile(r'^(.*)\+b\d+$')
-
-def ensuredir(directory):
-    if not os.path.isdir(directory):
-        os.makedirs(directory)
-
-
-def same_source(sv1, sv2, binnmu_re=binnmu_re):
-    """Check if two version numbers are built from the same source
-
-    This method returns a boolean value which is true if the two
-    version numbers specified as parameters are built from the same
-    source. The main use of this code is to detect binary-NMU.
-
-    binnmu_re is an optimization to avoid "load global".
-    """
-    if sv1 == sv2:
-        return 1
-
-    m = binnmu_re.match(sv1)
-    if m: sv1 = m.group(1)
-    m = binnmu_re.match(sv2)
-    if m: sv2 = m.group(1)
-
-    if sv1 == sv2:
-        return 1
-
-    return 0
 
 
 def ifilter_except(container, iterable=None):
@@ -76,8 +46,8 @@ def ifilter_except(container, iterable=None):
     iterators that are not known on beforehand.
     """
     if iterable is not None:
-        return ifilterfalse(container.__contains__, iterable)
-    return partial(ifilterfalse, container.__contains__)
+        return filterfalse(container.__contains__, iterable)
+    return partial(filterfalse, container.__contains__)
 
 
 def ifilter_only(container, iterable=None):
@@ -89,8 +59,8 @@ def ifilter_only(container, iterable=None):
     iterators that are not known on beforehand.
     """
     if iterable is not None:
-        return ifilter(container.__contains__, iterable)
-    return partial(ifilter, container.__contains__)
+        return filter(container.__contains__, iterable)
+    return partial(filter, container.__contains__)
 
 
 # iter_except is from the "itertools" recipe
@@ -119,8 +89,8 @@ def iter_except(func, exception, first=None):
         pass
 
 
-def undo_changes(lundo, inst_tester, sources, binaries,
-                 BINARIES=BINARIES, PROVIDES=PROVIDES):
+def undo_changes(lundo, inst_tester, sources, binaries, all_binary_packages,
+                 BINARIES=BINARIES):
     """Undoes one or more changes to testing
 
     * lundo is a list of (undo, item)-tuples
@@ -154,39 +124,44 @@ def undo_changes(lundo, inst_tester, sources, binaries,
     # undo all new binaries (consequence of the above)
     for (undo, item) in lundo:
         if not item.is_removal and item.package in sources[item.suite]:
-            for p in sources[item.suite][item.package][BINARIES]:
-                binary, arch = p.split("/")
+            source_data = sources[item.suite][item.package]
+            for pkg_id in source_data[BINARIES]:
+                binary, _, arch = pkg_id
                 if item.architecture in ['source', arch]:
-                    version = binaries["testing"][arch][0][binary][VERSION]
-                    del binaries["testing"][arch][0][binary]
-                    inst_tester.remove_testing_binary(binary, version, arch)
+                    try:
+                        del binaries["testing"][arch][0][binary]
+                    except KeyError:
+                        # If this happens, pkg_id must be a cruft item that
+                        # was *not* migrated.
+                        assert source_data[VERSION] != all_binary_packages[pkg_id].version
+                        assert not inst_tester.any_of_these_are_in_testing((pkg_id,))
+                    inst_tester.remove_testing_binary(pkg_id)
+
 
     # STEP 3
     # undo all other binary package changes (except virtual packages)
     for (undo, item) in lundo:
         for p in undo['binaries']:
-            binary, arch = p.split("/")
+            binary, arch = p
             if binary[0] == "-":
-                version = binaries["testing"][arch][0][binary][VERSION]
+                version = binaries["testing"][arch][0][binary].version
                 del binaries['testing'][arch][0][binary[1:]]
                 inst_tester.remove_testing_binary(binary, version, arch)
             else:
                 binaries_t_a = binaries['testing'][arch][0]
-                if p in binaries_t_a:
-                    rmpkgdata = binaries_t_a[p]
-                    inst_tester.remove_testing_binary(binary, rmpkgdata[VERSION], arch)
-                pkgdata = undo['binaries'][p]
+                assert binary not in binaries_t_a
+                pkgdata = all_binary_packages[undo['binaries'][p]]
                 binaries_t_a[binary] = pkgdata
-                inst_tester.add_testing_binary(binary, pkgdata[VERSION], arch)
+                inst_tester.add_testing_binary((binary, pkgdata.version, arch))
 
     # STEP 4
     # undo all changes to virtual packages
     for (undo, item) in lundo:
         for p in undo['nvirtual']:
-            j, arch = p.split("/")
+            j, arch = p
             del binaries['testing'][arch][1][j]
         for p in undo['virtual']:
-            j, arch = p.split("/")
+            j, arch = p
             if j[0] == '-':
                 del binaries['testing'][arch][1][j[1:]]
             else:
@@ -205,104 +180,24 @@ def old_libraries_format(libs):
     return "\n".join("  " + k + ": " + " ".join(libraries[k]) for k in libraries) + "\n"
 
 
+def compute_reverse_tree(inst_tester, affected):
+    """Calculate the full dependency tree for a set of packages
 
-def register_reverses(packages, provides, check_doubles=True, iterator=None,
-                      parse_depends=apt_pkg.parse_depends,
-                      DEPENDS=DEPENDS, CONFLICTS=CONFLICTS,
-                      RDEPENDS=RDEPENDS, RCONFLICTS=RCONFLICTS):
-    """Register reverse dependencies and conflicts for a given
-    sequence of packages
+    This method returns the full dependency tree for a given set of
+    packages.  The first argument is an instance of the InstallabilityTester
+    and the second argument are a set of packages ids (as defined in
+    the constructor of the InstallabilityTester).
 
-    This method registers the reverse dependencies and conflicts for a
-    given sequence of packages.  "packages" is a table of real
-    packages and "provides" is a table of virtual packages.
-
-    iterator is the sequence of packages for which the reverse
-    relations should be updated.
-
-    The "X=X" parameters are optimizations to avoid "load global" in
-    the loops.
+    The set of affected packages will be updated in place and must
+    therefore be mutable.
     """
-    if iterator is None:
-        iterator = packages.iterkeys()
-    else:
-        iterator = ifilter_only(packages, iterator)
-
-    for pkg in iterator:
-        # register the list of the dependencies for the depending packages
-        dependencies = []
-        pkg_data = packages[pkg]
-        if pkg_data[DEPENDS]:
-            dependencies.extend(parse_depends(pkg_data[DEPENDS], False))
-        # go through the list
-        for p in dependencies:
-            for a in p:
-                # strip off Multi-Arch qualifiers like :any or :native
-                dep = a[0].split(':')[0]
-                # register real packages
-                if dep in packages and (not check_doubles or pkg not in packages[dep][RDEPENDS]):
-                    packages[dep][RDEPENDS].append(pkg)
-                # also register packages which provide the package (if any)
-                if dep in provides:
-                    for i in provides[dep]:
-                        if i not in packages: continue
-                        if not check_doubles or pkg not in packages[i][RDEPENDS]:
-                            packages[i][RDEPENDS].append(pkg)
-        # register the list of the conflicts for the conflicting packages
-        if pkg_data[CONFLICTS]:
-            for p in parse_depends(pkg_data[CONFLICTS], False):
-                for a in p:
-                    con = a[0]
-                    # register real packages
-                    if con in packages and (not check_doubles or pkg not in packages[con][RCONFLICTS]):
-                        packages[con][RCONFLICTS].append(pkg)
-                    # also register packages which provide the package (if any)
-                    if con in provides:
-                        for i in provides[con]:
-                            if i not in packages: continue
-                            if not check_doubles or pkg not in packages[i][RCONFLICTS]:
-                                packages[i][RCONFLICTS].append(pkg)
-
-
-def compute_reverse_tree(packages_s, pkg, arch,
-                     set=set, flatten=chain.from_iterable,
-                     RDEPENDS=RDEPENDS):
-    """Calculate the full dependency tree for the given package
-
-    This method returns the full dependency tree for the package
-    "pkg", inside the "arch" architecture for a given suite flattened
-    as an iterable.  The first argument "packages_s" is the binary
-    package table for that given suite (e.g. Britney().binaries["testing"]).
-
-    The tree (or graph) is returned as an iterable of (package, arch)
-    tuples and the iterable will contain ("pkg", "arch") if it is
-    available on that architecture.
-
-    If "pkg" is not available on that architecture in that suite,
-    this returns an empty iterable.
-
-    The method does not promise any ordering of the returned
-    elements and the iterable is not reusable.
-
-    The flatten=... and the "X=X" parameters are optimizations to
-    avoid "load global" in the loops.
-    """
-    binaries = packages_s[arch][0]
-    if pkg not in binaries:
-        return frozenset()
-    rev_deps = set(binaries[pkg][RDEPENDS])
-    seen = set([pkg])
-
-    binfilt = ifilter_only(binaries)
-    revfilt = ifilter_except(seen)
-
-    while rev_deps:
-        # mark all of the current iteration of packages as affected
-        seen |= rev_deps
-        # generate the next iteration, which is the reverse-dependencies of
-        # the current iteration
-        rev_deps = set(revfilt(flatten( binaries[x][RDEPENDS] for x in binfilt(rev_deps) )))
-    return izip(seen, repeat(arch))
+    remain = list(affected)
+    while remain:
+        pkg_id = remain.pop()
+        new_pkg_ids = inst_tester.reverse_dependencies_of(pkg_id) - affected
+        affected.update(new_pkg_ids)
+        remain.extend(new_pkg_ids)
+    return None
 
 
 def write_nuninst(filename, nuninst):
@@ -311,7 +206,7 @@ def write_nuninst(filename, nuninst):
     Write the non-installable report derived from "nuninst" to the
     file denoted by "filename".
     """
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         # Having two fields with (almost) identical dates seems a bit
         # redundant.
         f.write("Built on: " + time.strftime("%Y.%m.%d %H:%M:%S %z", time.gmtime(time.time())) + "\n")
@@ -328,7 +223,7 @@ def read_nuninst(filename, architectures):
     will be included in the report.
     """
     nuninst = {}
-    with open(filename) as f:
+    with open(filename, encoding='ascii') as f:
         for r in f:
             if ":" not in r: continue
             arch, packages = r.strip().split(":", 1)
@@ -370,7 +265,7 @@ def eval_uninst(architectures, nuninst):
 
 def write_heidi(filename, sources_t, packages_t,
                 VERSION=VERSION, SECTION=SECTION,
-                ARCHITECTURE=ARCHITECTURE, sorted=sorted):
+                sorted=sorted):
     """Write the output HeidiResult
 
     This method write the output for Heidi, which contains all the
@@ -386,18 +281,21 @@ def write_heidi(filename, sources_t, packages_t,
     The "X=X" parameters are optimizations to avoid "load global" in
     the loops.
     """
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='ascii') as f:
 
         # write binary packages
         for arch in sorted(packages_t):
             binaries = packages_t[arch][0]
             for pkg_name in sorted(binaries):
                 pkg = binaries[pkg_name]
-                pkgv = pkg[VERSION]
-                pkgarch = pkg[ARCHITECTURE] or 'all'
-                pkgsec = pkg[SECTION] or 'faux'
-                if pkg[SOURCEVER] and pkgarch == 'all' and \
-                    pkg[SOURCEVER] != sources_t[pkg[SOURCE]][VERSION]:
+                pkgv = pkg.version
+                pkgarch = pkg.architecture or 'all'
+                pkgsec = pkg.section or 'faux'
+                if pkgsec == 'faux' or pkgsec.endswith('/faux'):
+                    # Faux package; not really a part of testing
+                    continue
+                if pkg.source_version and pkgarch == 'all' and \
+                    pkg.source_version != sources_t[pkg.source][VERSION]:
                     # when architectures are marked as "fucked", their binary
                     # versions may be lower than those of the associated
                     # source package in testing. the binary package list for
@@ -412,6 +310,9 @@ def write_heidi(filename, sources_t, packages_t,
             src = sources_t[src_name]
             srcv = src[VERSION]
             srcsec = src[SECTION] or 'unknown'
+            if srcsec == 'faux' or srcsec.endswith('/faux'):
+                # Faux package; not really a part of testing
+                continue
             f.write('%s %s source %s\n' % (src_name, srcv, srcsec))
 
 
@@ -425,7 +326,7 @@ def write_heidi_delta(filename, all_selected):
 
     The order corresponds to that shown in update_output.
     """
-    with open(filename, "w") as fd:
+    with open(filename, "w", encoding='ascii') as fd:
 
         fd.write("#HeidiDelta\n")
 
@@ -453,7 +354,7 @@ def make_migrationitem(package, sources, VERSION=VERSION):
     return MigrationItem("%s/%s" % (item.uvname, sources[item.suite][item.package][VERSION]))
 
 
-def write_excuses(excuses, dest_file, output_format="yaml"):
+def write_excuses(excuselist, dest_file, output_format="yaml"):
     """Write the excuses to dest_file
 
     Writes a list of excuses in a specified output_format to the
@@ -461,24 +362,21 @@ def write_excuses(excuses, dest_file, output_format="yaml"):
     or "legacy-html".
     """
     if output_format == "yaml":
-        ensuredir(os.path.dirname(dest_file))
-        with open(dest_file, 'w') as f:
-            excuselist = []
-            for e in excuses:
-                excuselist.append(e.excusedata())
-            excusesdata = {}
-            excusesdata["sources"] = excuselist
-            excusesdata["generated-date"] = datetime.utcnow()
+        with open(dest_file, 'w', encoding='utf-8') as f:
+            edatalist = [e.excusedata() for e in excuselist]
+            excusesdata = {
+                'sources': edatalist,
+                'generated-date': datetime.utcnow(),
+            }
             f.write(yaml.dump(excusesdata, default_flow_style=False, allow_unicode=True))
     elif output_format == "legacy-html":
-        ensuredir(os.path.dirname(dest_file))
-        with open(dest_file, 'w') as f:
+        with open(dest_file, 'w', encoding='utf-8') as f:
             f.write("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n")
             f.write("<html><head><title>excuses...</title>")
             f.write("<meta http-equiv=\"Content-Type\" content=\"text/html;charset=utf-8\"></head><body>\n")
             f.write("<p>Generated: " + time.strftime("%Y.%m.%d %H:%M:%S %z", time.gmtime(time.time())) + "</p>\n")
             f.write("<ul>\n")
-            for e in excuses:
+            for e in excuselist:
                 f.write("<li>%s" % e.html())
             f.write("</ul></body></html>\n")
     else:
@@ -489,19 +387,32 @@ def write_sources(sources_s, filename):
     """Write a sources file from Britney's state for a given suite
 
     Britney discards fields she does not care about, so the resulting
-    file omitts a lot of regular fields.
+    file omits a lot of regular fields.
     """
 
     key_pairs = ((VERSION, 'Version'), (SECTION, 'Section'),
                  (MAINTAINER, 'Maintainer'))
 
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         for src in sources_s:
            src_data = sources_s[src]
            output = "Package: %s\n" % src
            output += "\n".join(k + ": "+ src_data[key]
                                for key, k in key_pairs if src_data[key])
            f.write(output + "\n\n")
+
+
+def relation_atom_to_string(atom):
+    """Take a parsed dependency and turn it into a string
+    """
+    pkg, version, rel_op = atom
+    if rel_op != '':
+        if rel_op in ('<', '>'):
+            # APT translate "<<" and ">>" into "<" and ">".  We have
+            # deparse those into the original form.
+            rel_op += rel_op
+        return "%s (%s %s)" % (pkg, rel_op, version)
+    return pkg
 
 
 def write_controlfiles(sources, packages, suite, basedir):
@@ -522,37 +433,35 @@ def write_controlfiles(sources, packages, suite, basedir):
                  (PROVIDES, 'Provides'), (CONFLICTS, 'Conflicts'),
                  (ESSENTIAL, 'Essential'))
 
-    ensuredir(basedir)
     for arch in packages_s:
         filename = os.path.join(basedir, 'Packages_%s' % arch)
         binaries = packages_s[arch][0]
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding='utf-8') as f:
             for pkg in binaries:
                 output = "Package: %s\n" % pkg
                 bin_data = binaries[pkg]
                 for key, k in key_pairs:
-                    if not bin_data[key]: continue
+                    if not bin_data[key]:
+                        continue
                     if key == SOURCE:
-                        src = bin_data[SOURCE]
+                        src = bin_data.source
                         if sources_s[src][MAINTAINER]:
                             output += ("Maintainer: " + sources_s[src][MAINTAINER] + "\n")
 
-                        if bin_data[SOURCE] == pkg:
-                            if bin_data[SOURCEVER] != bin_data[VERSION]:
-                                source = src + " (" + bin_data[SOURCEVER] + ")"
+                        if src == pkg:
+                            if bin_data.source_version != bin_data.version:
+                                source = src + " (" + bin_data.source_version + ")"
                             else: continue
                         else:
-                            if bin_data[SOURCEVER] != bin_data[VERSION]:
-                                source = src + " (" + bin_data[SOURCEVER] + ")"
+                            if bin_data.source_version != bin_data.version:
+                                source = src + " (" + bin_data.source_version + ")"
                             else:
                                 source = src
                         output += (k + ": " + source + "\n")
                     elif key == PROVIDES:
-                        if bin_data[key]:
-                            output += (k + ": " + ", ".join(bin_data[key]) + "\n")
+                        output += (k + ": " + ", ".join(relation_atom_to_string(p) for p in bin_data[key]) + "\n")
                     elif key == ESSENTIAL:
-                        if bin_data[key]:
-                            output += (k + ": " + " yes\n")
+                        output += (k + ": " + " yes\n")
                     else:
                         output += (k + ": " + bin_data[key] + "\n")
                 f.write(output + "\n")
@@ -560,7 +469,7 @@ def write_controlfiles(sources, packages, suite, basedir):
     write_sources(sources_s, os.path.join(basedir, 'Sources'))
 
 
-def old_libraries(sources, packages, same_source=same_source):
+def old_libraries(sources, packages, fucked_arches=frozenset()):
     """Detect old libraries left in testing for smooth transitions
 
     This method detects old libraries which are in testing but no
@@ -568,7 +477,9 @@ def old_libraries(sources, packages, same_source=same_source):
     other packages still depend on them, but they should be removed as
     soon as possible.
 
-    same_source is an optimisation to avoid "load global".
+    For "fucked" architectures, outdated binaries are allowed to be in
+    testing, so they are only added to the removal list if they are no longer
+    in unstable.
     """
     sources_t = sources['testing']
     testing = packages['testing']
@@ -577,24 +488,28 @@ def old_libraries(sources, packages, same_source=same_source):
     for arch in testing:
         for pkg_name in testing[arch][0]:
             pkg = testing[arch][0][pkg_name]
-            if pkg_name not in unstable[arch][0] and \
-                    not same_source(sources_t[pkg[SOURCE]][VERSION], pkg[SOURCEVER]):
-                migration = "-" + "/".join((pkg_name, arch, pkg[SOURCEVER]))
+            if sources_t[pkg.source][VERSION] != pkg.source_version and \
+                (arch not in fucked_arches or pkg_name not in unstable[arch][0]):
+                migration = "-" + "/".join((pkg_name, arch, pkg.source_version))
                 removals.append(MigrationItem(migration))
     return removals
 
 
-def is_nuninst_asgood_generous(architectures, old, new, break_arches=frozenset()):
-    """Compares the nuninst counters to see if they improved
+def is_nuninst_asgood_generous(constraints, architectures, old, new, break_arches=frozenset()):
+    """Compares the nuninst counters and constraints to see if they improved
 
-    Given a list of architecters, the previous and the current nuninst
+    Given a list of architectures, the previous and the current nuninst
     counters, this function determines if the current nuninst counter
     is better than the previous one.  Optionally it also accepts a set
     of "break_arches", the nuninst counter for any architecture listed
     in this set are completely ignored.
 
+    If the nuninst counters are equal or better, then the constraints
+    are checked for regressions (ignoring break_arches).
+
     Returns True if the new nuninst counter is better than the
-    previous.  Returns False otherwise.
+    previous and there are no constraint regressions (ignoring Break-archs).
+    Returns False otherwise.
 
     """
     diff = 0
@@ -602,4 +517,140 @@ def is_nuninst_asgood_generous(architectures, old, new, break_arches=frozenset()
         if arch in break_arches:
             continue
         diff = diff + (len(new[arch]) - len(old[arch]))
-    return diff <= 0
+    if diff > 0:
+        return False
+    must_be_installable = constraints['keep-installable']
+    for arch in architectures:
+        if arch in break_arches:
+            continue
+        regression = new[arch] - old[arch]
+        if not regression.isdisjoint(must_be_installable):
+            return False
+    return True
+
+
+def clone_nuninst(nuninst, packages_s, architectures):
+    """Selectively deep clone nuninst
+
+    Given nuninst table, the package table for a given suite and
+    a list of architectures, this function will clone the nuninst
+    table.  Only the listed architectures will be deep cloned -
+    the rest will only be shallow cloned.
+    """
+    clone = nuninst.copy()
+    for arch in architectures:
+        clone[arch] = set(x for x in nuninst[arch] if x in packages_s[arch][0])
+        clone[arch + "+all"] = set(x for x in nuninst[arch + "+all"] if x in packages_s[arch][0])
+    return clone
+
+
+def test_installability(inst_tester, pkg_name, pkg_id, broken, nuninst_arch):
+    """Test for installability of a package on an architecture
+
+    (pkg_name, pkg_version, pkg_arch) is the package to check.
+
+    broken is the set of broken packages.  If p changes
+    installability (e.g. goes from uninstallable to installable),
+    broken will be updated accordingly.
+
+    If nuninst_arch is not None then it also updated in the same
+    way as broken is.
+    """
+    c = 0
+    r = inst_tester.is_installable(pkg_id)
+    if not r:
+        # not installable
+        if pkg_name not in broken:
+            # regression
+            broken.add(pkg_name)
+            c = -1
+        if nuninst_arch is not None and pkg_name not in nuninst_arch:
+            nuninst_arch.add(pkg_name)
+    else:
+        if pkg_name in broken:
+            # Improvement
+            broken.remove(pkg_name)
+            c = 1
+        if nuninst_arch is not None and pkg_name in nuninst_arch:
+            nuninst_arch.remove(pkg_name)
+    return c
+
+
+def check_installability(inst_tester, binaries, arch, updates, affected, check_archall, nuninst):
+    broken = nuninst[arch + "+all"]
+    packages_t_a = binaries[arch][0]
+    improvement = 0
+
+    # broken packages (first round)
+    for pkg_id in (x for x in updates if x[2] == arch):
+        name, version, parch = pkg_id
+        if name not in packages_t_a:
+            continue
+        pkgdata = packages_t_a[name]
+        if version != pkgdata.version:
+            # Not the version in testing right now, ignore
+            continue
+        actual_arch = pkgdata.architecture
+        nuninst_arch = None
+        # only check arch:all packages if requested
+        if check_archall or actual_arch != 'all':
+            nuninst_arch = nuninst[parch]
+        elif actual_arch == 'all':
+            nuninst[parch].discard(name)
+        result = test_installability(inst_tester, name, pkg_id, broken, nuninst_arch)
+        if improvement > 0 or not result:
+            # Any improvement could in theory fix all of its rdeps, so
+            # stop updating "improvement" after that.
+            continue
+        if result > 0:
+            # Any improvement (even in arch:all packages) could fix any
+            # number of rdeps
+            improvement = 1
+            continue
+        if check_archall or actual_arch != 'all':
+            # We cannot count arch:all breakage (except on no-break-arch-all arches)
+            # because the nuninst check do not consider them regressions.
+            improvement += result
+
+    if improvement < 0:
+        # The early round is sufficient to disprove the situation
+        return
+
+    for pkg_id in (x for x in affected if x[2] == arch):
+        name, version, parch = pkg_id
+        if name not in packages_t_a:
+            continue
+        pkgdata = packages_t_a[name]
+        if version != pkgdata.version:
+            # Not the version in testing right now, ignore
+            continue
+        actual_arch = pkgdata.architecture
+        nuninst_arch = None
+        # only check arch:all packages if requested
+        if check_archall or actual_arch != 'all':
+            nuninst_arch = nuninst[parch]
+        elif actual_arch == 'all':
+            nuninst[parch].discard(name)
+        test_installability(inst_tester, name, pkg_id, broken, nuninst_arch)
+
+
+def possibly_compressed(path, permitted_compressesion=None):
+    """Find and select a (possibly compressed) variant of a path
+
+    If the given path exists, it will be returned
+
+    :param path The base path.
+    :param permitted_compressesion An optional list of alternative extensions to look for.
+      Defaults to "gz" and "xz".
+    :returns The path given possibly with one of the permitted extensions.  Will raise a
+     FileNotFoundError
+    """
+    if os.path.exists(path):
+        return path
+    if permitted_compressesion is None:
+        permitted_compressesion = ['gz', 'xz']
+    for ext in permitted_compressesion:
+        cpath = "%s.%s" % (path, ext)
+        if os.path.exists(cpath):
+            return cpath
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)

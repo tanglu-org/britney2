@@ -29,7 +29,7 @@ class _RelationBuilder(object):
         self._new_breaks = set(binary_data[1])
 
 
-    def add_dependency_clause(self, or_clause, frozenset=frozenset):
+    def add_dependency_clause(self, or_clause):
         """Add a dependency clause
 
         The clause must be a sequence of (name, version, architecture)
@@ -45,10 +45,9 @@ class _RelationBuilder(object):
         However, they must be added before the "build()" method is
         called.
         """
-        clause = self._itbuilder._intern_set(or_clause)
-        binary = self._binary
         itbuilder = self._itbuilder
-        package_table = itbuilder._package_table
+        clause = itbuilder._intern_set(or_clause)
+        binary = self._binary
         okay = False
         for dep_tuple in clause:
             okay = True
@@ -58,7 +57,7 @@ class _RelationBuilder(object):
 
         self._new_deps.add(clause)
         if not okay:
-            self._itbuilder._broken.add(binary)
+            itbuilder._broken.add(binary)
 
 
     def add_breaks(self, broken_binary):
@@ -388,7 +387,7 @@ class InstallabilityTesterBuilder(object):
             ekey = (deps, con, rdeps)
             find_eqv_table[ekey].append(pkg)
 
-        for pkg_list in find_eqv_table.itervalues():
+        for pkg_list in find_eqv_table.values():
             if len(pkg_list) < 2:
                 continue
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2006, 2011-2015 Anthony Towns <ajt@debian.org>
+# Copyright (C) 2001-2004 Anthony Towns <ajt@debian.org>
 #                         Andreas Barth <aba@debian.org>
 #                         Fabio Tranchitella <kobold@debian.org>
 
@@ -14,13 +14,13 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
+from collections import defaultdict
 import re
-import string
 
 
 class Excuse(object):
     """Excuse class
-
+    
     This class represents an update excuse, which is a detailed explanation
     of why a package can or cannot be updated in the testing distribution from
     a newer package in another distribution (like for example unstable).
@@ -37,7 +37,7 @@ class Excuse(object):
 
     def __init__(self, name):
         """Class constructor
-
+        
         This method initializes the excuse with the specified name and
         the default values.
         """
@@ -50,10 +50,9 @@ class Excuse(object):
         self.section = None
         self._is_valid = False
         self._dontinvalidate = False
+        self.needs_approval = False
+        self.hints = []
         self.forced = False
-        self.run_autopkgtest = False
-        self.run_boottest = False
-        self.distribution = "tanglu"
 
         self.invalid_deps = []
         self.deps = {}
@@ -64,6 +63,15 @@ class Excuse(object):
         self.oldbugs = set()
         self.reason = {}
         self.htmlline = []
+        self.missing_builds = set()
+        self.missing_builds_ood_arch = set()
+        self.old_binaries = defaultdict(set)
+        self.policy_info = {}
+
+    def sortkey(self):
+        if self.daysold == None:
+            return (-1, self.name)
+        return (self.daysold, self.name)
 
     @property
     def is_valid(self):
@@ -98,10 +106,6 @@ class Excuse(object):
         """Set the urgency of upload of the package"""
         self.urgency = date
 
-    def set_distribution(self, distribution):
-        """Set the distribution name"""
-        self.distribution = distribution
-
     def add_dep(self, name, arch):
         """Add a dependency"""
         if name not in self.deps: self.deps[name]=[]
@@ -133,30 +137,31 @@ class Excuse(object):
         """Add a note in HTML"""
         self.htmlline.append(note)
 
+    def missing_build_on_arch(self, arch):
+        """Note that the item is missing a build on a given architecture"""
+        self.missing_builds.add(arch)
+
+    def missing_build_on_ood_arch(self, arch):
+        """Note that the item is missing a build on a given "out of date" architecture"""
+        self.missing_builds.add(arch)
+
+    def add_old_binary(self, binary, from_source_version):
+        """Denote than an old binary ("cruft") is available from a previous source version"""
+        self.old_binaries[from_source_version].add(binary)
+
+    def add_hint(self, hint):
+        self.hints.append(hint)
+
     def html(self):
         """Render the excuse in HTML"""
-        lp_pkg = "http://packages.tanglu.org/source/%s" % (self.name.split("/")[0])
-        if self.ver[0] == "-":
-            lp_old = self.ver[0]
-        else:
-            lp_old = "<a href=\"%s/%s\">%s</a>" % (
-                lp_pkg, self.ver[0], self.ver[0])
-        if self.ver[1] == "-":
-            lp_new = self.ver[1]
-        else:
-            lp_new = "<a href=\"%s/%s\">%s</a>" % (
-                lp_pkg, self.ver[1], self.ver[1])
-        res = (
-            "<a id=\"%s\" name=\"%s\" href=\"%s\">%s</a> (%s to %s)\n<ul>\n" %
-            (self.name, self.name, lp_pkg, self.name, lp_old, lp_new))
+        res = "<a id=\"%s\" name=\"%s\">%s</a> (%s to %s)\n<ul>\n" % \
+            (self.name, self.name, self.name, self.ver[0], self.ver[1])
         if self.maint:
             res = res + "<li>Maintainer: %s\n" % (self.maint)
-        if self.section and string.find(self.section, "/") > -1:
+        if self.section and self.section.find("/") > -1:
             res = res + "<li>Section: %s\n" % (self.section)
         if self.daysold != None:
-            if self.mindays == 0:
-                res = res + ("<li>%d days old\n" % self.daysold)
-            elif self.daysold < self.mindays:
+            if self.daysold < self.mindays:
                 res = res + ("<li>Too young, only %d of %d days old\n" %
                 (self.daysold, self.mindays))
             else:
@@ -165,7 +170,7 @@ class Excuse(object):
         for x in self.htmlline:
             res = res + "<li>" + x + "\n"
         lastdep = ""
-        for x in sorted(self.deps, lambda x,y: cmp(x.split('/')[0], y.split('/')[0])):
+        for x in sorted(self.deps, key=lambda x: x.split('/')[0]):
             dep = x.split('/')[0]
             if dep == lastdep: continue
             lastdep = dep
@@ -178,6 +183,8 @@ class Excuse(object):
                 res += "<li>Ignoring %s depends: <a href=\"#%s\">%s</a>\n" % (a, n, n)
         if self.is_valid:
             res += "<li>Valid candidate\n"
+        else:
+            res += "<li>Not considered\n"
         res = res + "</ul>\n"
         return res
 
@@ -190,65 +197,70 @@ class Excuse(object):
         """"adding reason"""
         self.reason[reason] = 1
 
-    # TODO merge with html()
-    def text(self):
+    # TODO: remove
+    def _text(self):
         """Render the excuse in text"""
         res = []
-        res.append("%s (%s to %s)" % \
-            (self.name, self.ver[0], self.ver[1]))
-        if self.maint:
-            maint = self.maint
-            # ugly hack to work around strange encoding in pyyaml
-            # should go away with pyyaml in python 3
-            try:
-                maint.decode('ascii')
-            except UnicodeDecodeError:
-                maint = unicode(self.maint,'utf-8')
-            res.append("Maintainer: %s" % maint)
-        if self.section and string.find(self.section, "/") > -1:
-            res.append("Section: %s" % (self.section))
-        if self.daysold != None:
-            if self.mindays == 0:
-                res.append("%d days old" % self.daysold)
-            elif self.daysold < self.mindays:
-                res.append(("Too young, only %d of %d days old" %
-                (self.daysold, self.mindays)))
-            else:
-                res.append(("%d days old (needed %d days)" %
-                (self.daysold, self.mindays)))
         for x in self.htmlline:
             res.append("" + x + "")
-        lastdep = ""
-        for x in sorted(self.deps, lambda x,y: cmp(x.split('/')[0], y.split('/')[0])):
-            dep = x.split('/')[0]
-            if dep == lastdep: continue
-            lastdep = dep
-            if x in self.invalid_deps:
-                res.append("Depends: %s %s (not considered)" % (self.name, dep))
-            else:
-                res.append("Depends: %s %s" % (self.name, dep))
-        for (n,a) in self.break_deps:
-            if n not in self.deps:
-                res.append("Ignoring %s depends: %s" % (a, n))
-        if self.is_valid:
-            res.append("Valid candidate")
         return res
 
     def excusedata(self):
         """Render the excuse in as key-value data"""
+        source = self.name
+        if '/' in source:
+            source = source.split("/")[0]
+        if source[0] == '-':
+            source = source[1:]
         excusedata = {}
-        excusedata["excuses"] = self.text()
-        excusedata["source"] = self.name
+        excusedata["excuses"] = self._text()
+        excusedata["item-name"] = self.name
+        excusedata["source"] = source
         excusedata["old-version"] = self.ver[0]
         excusedata["new-version"] = self.ver[1]
-        excusedata["age"] = self.daysold
-        excusedata["age-needed"] = self.mindays
-        excusedata["new-bugs"] = sorted(self.newbugs)
-        excusedata["old-bugs"] = sorted(self.oldbugs)
+        if self.maint:
+            excusedata['maintainer'] = self.maint
+        if self.section and self.section.find("/") > -1:
+            excusedata['component'] = self.section.split('/')[0]
+        if self.policy_info:
+            excusedata['policy_info'] = self.policy_info
+        if self.missing_builds or self.missing_builds_ood_arch:
+            excusedata['missing-builds'] = {
+                'on-architectures': sorted(self.missing_builds),
+                'on-unimportant-architectures': sorted(self.missing_builds_ood_arch),
+            }
+        if self.deps or self.invalid_deps or self.break_deps:
+            excusedata['dependencies'] = dep_data = {}
+            migrate_after = sorted(x for x in self.deps if x not in self.invalid_deps)
+            break_deps = [x for x, _ in self.break_deps if x not in self.deps]
+
+            if self.invalid_deps:
+                dep_data['blocked-by'] = sorted(self.invalid_deps)
+            if migrate_after:
+                dep_data['migrate-after'] = migrate_after
+            if break_deps:
+                dep_data['unimportant-dependencies'] = sorted(break_deps)
+        if self.needs_approval:
+            status = 'not-approved'
+            for h in self.hints:
+                if h.type == 'unblock':
+                    status = 'approved'
+                    break
+            excusedata['manual-approval-status'] = status
+        if self.hints:
+            hint_info = [{
+                             'hint-type': h.type,
+                             'hint-from': h.user,
+                         } for h in self.hints]
+
+            excusedata['hints'] = hint_info
+        if self.old_binaries:
+            excusedata['old-binaries'] = {x: sorted(self.old_binaries[x]) for x in self.old_binaries}
         if self.forced:
-            excusedata["forced-reason"] = self.reason.keys()
+            excusedata["forced-reason"] = sorted(list(self.reason.keys()))
             excusedata["reason"] = []
         else:
-            excusedata["reason"] = self.reason.keys()
+            excusedata["reason"] = sorted(list(self.reason.keys()))
         excusedata["is-candidate"] = self.is_valid
         return excusedata
+
