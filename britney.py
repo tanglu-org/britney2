@@ -291,7 +291,10 @@ class Britney(object):
         # read the source and binary packages for the involved distributions
         self.sources['testing'] = self.read_sources(self.options.testing)
         self.sources['unstable'] = self.read_sources(self.options.unstable)
-        self.sources['tpu'] = self.read_sources(self.options.tpu)
+        if hasattr(self.options, "tpu"):
+            self.sources['tpu'] = self.read_sources(self.options.tpu)
+        else:
+            self.sources["tpu"] = {}
 
         if hasattr(self.options, 'pu'):
             self.sources['pu'] = self.read_sources(self.options.pu)
@@ -305,7 +308,14 @@ class Britney(object):
 
         for arch in self.options.architectures:
             self.binaries['unstable'][arch] = self.read_binaries(self.options.unstable, "unstable", arch)
-            self.binaries['tpu'][arch] = self.read_binaries(self.options.tpu, "tpu", arch)
+            if hasattr(self.options, 'tpu'):
+                self.binaries['tpu'][arch] = self.read_binaries(self.options.tpu, "tpu", arch)
+            else:
+                # _build_installability_tester relies on it being
+                # properly initialised, so insert two empty dicts
+                # here.
+                self.binaries['tpu'][arch] = ({}, {})
+
             if hasattr(self.options, 'pu'):
                 self.binaries['pu'][arch] = self.read_binaries(self.options.pu, "pu", arch)
             else:
