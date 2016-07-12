@@ -227,6 +227,12 @@ check_field_name = dict((globals()[fn], fn) for fn in
 
 check_fields = sorted(check_field_name)
 
+BinaryPackageId = namedtuple('BinaryPackageId', [
+                               'package_name',
+                               'version',
+                               'architecture',
+                           ])
+
 BinaryPackage = namedtuple('BinaryPackage', [
                                'version',
                                'section',
@@ -238,6 +244,7 @@ BinaryPackage = namedtuple('BinaryPackage', [
                                'conflicts',
                                'provides',
                                'is_essential',
+                               'pkg_id',
                            ])
 
 class Britney(object):
@@ -278,7 +285,7 @@ class Britney(object):
         try:
             self.hints = self.read_hints(self.options.hintsdir)
         except AttributeError:
-            self.hints = self.read_hints(self.options.unstable)
+            self.hints = self.read_hints(os.path.join(self.options.unstable, 'Hints'))
 
         if self.options.nuninst_cache:
             self.log("Not building the list of non-installable packages, as requested", type="I")
@@ -291,12 +298,11 @@ class Britney(object):
         # read the source and binary packages for the involved distributions
         self.sources['testing'] = self.read_sources(self.options.testing)
         self.sources['unstable'] = self.read_sources(self.options.unstable)
-        self.sources['tpu'] = self.read_sources(self.options.tpu)
-
-        if hasattr(self.options, 'pu'):
-            self.sources['pu'] = self.read_sources(self.options.pu)
-        else:
-            self.sources['pu'] = {}
+        for suite in ('tpu', 'pu'):
+            if hasattr(self.options, suite):
+                self.sources[suite] = self.read_sources(getattr(self.options, suite))
+            else:
+                self.sources[suite] = {}
 
         self.binaries['testing'] = {}
         self.binaries['unstable'] = {}
@@ -305,14 +311,14 @@ class Britney(object):
 
         for arch in self.options.architectures:
             self.binaries['unstable'][arch] = self.read_binaries(self.options.unstable, "unstable", arch)
-            self.binaries['tpu'][arch] = self.read_binaries(self.options.tpu, "tpu", arch)
-            if hasattr(self.options, 'pu'):
-                self.binaries['pu'][arch] = self.read_binaries(self.options.pu, "pu", arch)
-            else:
-                # _build_installability_tester relies on it being
-                # properly initialised, so insert two empty dicts
-                # here.
-                self.binaries['pu'][arch] = ({}, {})
+            for suite in ('tpu', 'pu'):
+                if hasattr(self.options, suite):
+                    self.binaries[suite][arch] = self.read_binaries(getattr(self.options, suite), suite, arch)
+                else:
+                    # _build_installability_tester relies on this being
+                    # properly initialised, so insert two empty dicts
+                    # here.
+                    self.binaries[suite][arch] = ({}, {})
             # Load testing last as some live-data tests have more complete information in
             # unstable
             self.binaries['testing'][arch] = self.read_binaries(self.options.testing, "testing", arch)
@@ -327,7 +333,7 @@ class Britney(object):
         if faux_packages is not None and os.path.exists(faux_packages):
             self.log("Loading faux packages from %s" % faux_packages, type='I')
             self._load_faux_packages(faux_packages)
-        else:
+        elif faux_packages is not None:
             self.log("No Faux packages as %s does not exist" % faux_packages, type='I')
 
         if constraints_file is not None and os.path.exists(constraints_file):
@@ -542,7 +548,7 @@ class Britney(object):
             self.sources['unstable'][pkg_name] = src_data
 
             for arch in archs:
-                pkg_id = (pkg_name, version, arch)
+                pkg_id = BinaryPackageId(pkg_name, version, arch)
                 if provides_raw:
                     provides = self._parse_provides(pkg_id, provides_raw)
                 else:
@@ -557,6 +563,7 @@ class Britney(object):
                                          None,
                                          provides,
                                          False,
+                                         pkg_id,
                                          )
 
                 src_data[BINARIES].append(pkg_id)
@@ -634,7 +641,7 @@ class Britney(object):
                             elif ',' in a or '!' in a:
                                 msg = "Invalid arch-restriction for %s: Uses comma or negation (for %s file %s)"
                                 raise ValueError(msg % (pkg, pkg_name, constraints_file))
-                pkg_id = (pkg_name, faux_version, arch)
+                pkg_id = BinaryPackageId(pkg_name, faux_version, arch)
                 bin_data = BinaryPackage(faux_version,
                                          faux_section,
                                          pkg_name,
@@ -645,6 +652,7 @@ class Britney(object):
                                          None,
                                          [],
                                          False,
+                                         pkg_id,
                                          )
                 src_data[BINARIES].append(pkg_id)
                 self.binaries['testing'][arch][0][pkg_name] = bin_data
@@ -664,9 +672,8 @@ class Britney(object):
             testing = (dist == 'testing')
             for pkgname in binaries[dist][arch][0]:
                 pkgdata = binaries[dist][arch][0][pkgname]
-                version = pkgdata.version
-                t = (pkgname, version, arch)
-                if not builder.add_binary(t, essential=pkgdata.is_essential,
+                pkg_id = pkgdata.pkg_id
+                if not builder.add_binary(pkg_id, essential=pkgdata.is_essential,
                                           in_testing=testing):
                     continue
 
@@ -681,7 +688,7 @@ class Britney(object):
                 if pkgdata.conflicts:
                     conflicts = apt_pkg.parse_depends(pkgdata.conflicts, False)
 
-                with builder.relation_builder(t) as relations:
+                with builder.relation_builder(pkg_id) as relations:
 
                     for (al, dep) in [(depends, True), \
                                       (conflicts, False)]:
@@ -697,14 +704,14 @@ class Britney(object):
                                     # the package name extracted from the field and it is therefore
                                     # not interned.
                                     pdata = dep_packages_s_a[0][p]
-                                    pt = (sys.intern(p), pdata.version, arch)
+                                    dep_pkg_id = pdata.pkg_id
                                     if dep:
-                                        sat.add(pt)
-                                    elif t != pt:
+                                        sat.add(dep_pkg_id)
+                                    elif pkg_id != dep_pkg_id:
                                         # if t satisfies its own
                                         # conflicts relation, then it
                                         # is using §7.6.2
-                                        relations.add_breaks(pt)
+                                        relations.add_breaks(dep_pkg_id)
                             if dep:
                                 if len(block) != 1:
                                     relations.add_dependency_clause(sat)
@@ -840,13 +847,13 @@ class Britney(object):
             # largest version for migration.
             pkg = intern(pkg)
             version = intern(version)
-            pkg_id = (pkg, version, arch)
+            pkg_id = BinaryPackageId(pkg, version, arch)
 
             if pkg in packages:
                 old_pkg_data = packages[pkg]
                 if apt_pkg.version_compare(old_pkg_data.version, version) > 0:
                     continue
-                old_pkg_id = (pkg, old_pkg_data.version, arch)
+                old_pkg_id = old_pkg_data.pkg_id
                 old_src_binaries = srcdist[old_pkg_data[SOURCE]][BINARIES]
                 old_src_binaries.remove(old_pkg_id)
                 # This may seem weird at first glance, but the current code rely
@@ -905,6 +912,7 @@ class Britney(object):
                     ', '.join(final_conflicts_list) or None,
                     provides,
                     ess,
+                    pkg_id,
                    )
 
             # if the source package is available in the distribution, then register this binary package
@@ -969,11 +977,27 @@ class Britney(object):
         if self.options.components:
             packages = {}
             for component in self.options.components:
+                binary_dir = "binary-%s" % arch
                 filename = os.path.join(basedir,
-                             component, "binary-%s" % arch, "Packages")
-                filename = possibly_compressed(filename)
+                             component, binary_dir, 'Packages')
+                try:
+                    filename = possibly_compressed(filename)
+                except FileNotFoundError as e:
+                    if arch not in self.options.new_arches:
+                        raise
+                    self.log("Ignoring missing file for new arch %s: %s" % (arch, filename))
+                    continue
+                udeb_filename =  os.path.join(basedir,
+                                   component, "debian-installer",
+                                              binary_dir, "Packages")
+                # We assume the udeb Packages file is present if the
+                # regular one is present
+                udeb_filename = possibly_compressed(udeb_filename)
                 self._read_packages_file(filename, arch,
                       self.sources[distribution], packages)
+                self._read_packages_file(udeb_filename, arch,
+                      self.sources[distribution], packages)
+
         else:
             filename = os.path.join(basedir, "Packages_%s" % arch)
             packages = self._read_packages_file(filename, arch,
@@ -991,11 +1015,11 @@ class Britney(object):
         # return a tuple with the list of real and virtual packages
         return (packages, provides)
 
-    def read_hints(self, basedir):
+    def read_hints(self, hintsdir):
         """Read the hint commands from the specified directory
         
-        The hint commands are read from the files contained in the `Hints'
-        directory within the directory specified as `basedir' parameter. 
+        The hint commands are read from the files contained in the directory
+        specified by the `hintsdir' parameter.
         The names of the files have to be the same as the authorized users
         for the hints.
         
@@ -1014,7 +1038,7 @@ class Britney(object):
                 filename = '<cmd-line>'
                 hint_parser.parse_hints(who, self.HINTS[who], filename, lines)
             else:
-                filename = os.path.join(basedir, "Hints", who)
+                filename = os.path.join(hintsdir, who)
                 if not os.path.isfile(filename):
                     self.log("Cannot read hints list from %s, no such file!" % filename, type="E")
                     continue
@@ -1191,7 +1215,6 @@ class Britney(object):
         src = self.sources['testing'][pkg]
         excuse = Excuse("-" + pkg)
         excuse.addhtml("Package not in unstable, will try to remove")
-        excuse.addreason("remove")
         excuse.set_vers(src[VERSION], None)
         src[MAINTAINER] and excuse.set_maint(src[MAINTAINER].strip())
         src[SECTION] and excuse.set_section(src[SECTION].strip())
@@ -1235,9 +1258,9 @@ class Britney(object):
         # (as a side effect, a removal may generate such excuses for both the source
         # package and its binary packages on each architecture)
         for hint in self.hints.search('remove', package=src, version=source_t[VERSION]):
+            excuse.add_hint(hint)
             excuse.addhtml("Removal request by %s" % (hint.user))
             excuse.addhtml("Trying to remove package, not update it")
-            excuse.addreason("remove")
             self.excuses[excuse.name] = excuse
             return False
 
@@ -1249,8 +1272,8 @@ class Britney(object):
         packages_s_a = self.binaries[suite][arch][0]
 
         # for every binary package produced by this source in unstable for this architecture
-        for pkg_id in sorted(x for x in source_u[BINARIES] if x[2] == arch):
-            pkg_name = pkg_id[0]
+        for pkg_id in sorted(x for x in source_u[BINARIES] if x.architecture == arch):
+            pkg_name = pkg_id.package_name
 
             # retrieve the testing (if present) and unstable corresponding binary packages
             binary_t = pkg_name in packages_t_a and packages_t_a[pkg_name] or None
@@ -1327,8 +1350,8 @@ class Britney(object):
                                                         arch,
                                                         False)
 
-                for pkg_id in sorted(x for x in source_t[BINARIES] if x[2] == arch):
-                    pkg = pkg_id[0]
+                for pkg_id in sorted(x for x in source_t[BINARIES] if x.architecture == arch):
+                    pkg = pkg_id.package_name
                     # if the package is architecture-independent, then ignore it
                     tpkg_data = packages_t_a[pkg]
                     if tpkg_data.version == 'all':
@@ -1408,12 +1431,12 @@ class Britney(object):
 
         # if there is a `remove' hint and the requested version is the same as the
         # version in testing, then stop here and return False
-        for item in self.hints.search('remove', package=src):
-            if source_t and source_t[VERSION] == item.version or \
-               source_u[VERSION] == item.version:
-                excuse.addhtml("Removal request by %s" % (item.user))
+        for hint in self.hints.search('remove', package=src):
+            if source_t and source_t[VERSION] == hint.version or \
+               source_u[VERSION] == hint.version:
+                excuse.add_hint(hint)
+                excuse.addhtml("Removal request by %s" % (hint.user))
                 excuse.addhtml("Trying to remove package, not update it")
-                excuse.addreason("remove")
                 update_candidate = False
 
         # check if there is a `block' or `block-udeb' hint for this package, or a `block-all source' hint
@@ -1426,10 +1449,11 @@ class Britney(object):
                 blocked['block-udeb'] = hint
                 excuse.add_hint(hint)
         if 'block' not in blocked:
-            for hint in self.hints.search(type='block-all', package='source'):
-                blocked['block'] = hint
-                excuse.add_hint(hint)
-                break
+            for hint in self.hints.search(type='block-all'):
+                if hint.package == 'source' or (not source_t and hint.package == 'new-source'):
+                    blocked['block'] = hint
+                    excuse.add_hint(hint)
+                    break
         if suite in ('pu', 'tpu'):
             blocked['block'] = '%s-block' % (suite)
             excuse.needs_approval = True
@@ -1511,16 +1535,16 @@ class Britney(object):
             excuse.setbugs(old_bugs, new_bugs)
 
             if new_bugs:
-                excuse.addhtml("%s <a href=\"http://bugs.debian.org/cgi-bin/pkgreport.cgi?" \
-                               "pkg=src:%s&sev-inc=critical&sev-inc=grave&sev-inc=serious\" " \
+                excuse.addhtml("%s <a href=\"https://bugs.debian.org/cgi-bin/pkgreport.cgi?" \
+                               "src=%s&sev-inc=critical&sev-inc=grave&sev-inc=serious\" " \
                                "target=\"_blank\">has new bugs</a>!" % (src, quote(src)))
                 excuse.addhtml("Updating %s introduces new bugs: %s" % (src, ", ".join(
-                    ["<a href=\"http://bugs.debian.org/%s\">#%s</a>" % (quote(a), a) for a in new_bugs])))
+                    ["<a href=\"https://bugs.debian.org/%s\">#%s</a>" % (quote(a), a) for a in new_bugs])))
                 update_candidate = False
 
             if old_bugs:
                 excuse.addhtml("Updating %s fixes old bugs: %s" % (src, ", ".join(
-                    ["<a href=\"http://bugs.debian.org/%s\">#%s</a>" % (quote(a), a) for a in old_bugs])))
+                    ["<a href=\"https://bugs.debian.org/%s\">#%s</a>" % (quote(a), a) for a in old_bugs])))
             if new_bugs and len(old_bugs) > len(new_bugs):
                 excuse.addhtml("%s introduces new bugs, so still ignored (even "
                                "though it fixes more than it introduces, whine at debian-release)" % src)
@@ -1534,7 +1558,7 @@ class Britney(object):
                 # if the package in testing has no binaries on this
                 # architecture, it can't be out-of-date
                 if not any(x for x in source_t[BINARIES]
-                           if x[2] == arch and all_binaries[x].architecture != 'all'):
+                           if x.architecture == arch and all_binaries[x].architecture != 'all'):
                     continue
 
                 # if the (t-)p-u package has produced any binaries on
@@ -1550,7 +1574,7 @@ class Britney(object):
                     base = 'testing'
                 else:
                     base = 'stable'
-                text = "Not yet built on <a href=\"http://buildd.debian.org/status/logs.php?arch=%s&pkg=%s&ver=%s&suite=%s\" target=\"_blank\">%s</a> (relative to testing)" % (quote(arch), quote(src), quote(source_u[VERSION]), base, arch)
+                text = "Not yet built on <a href=\"https://buildd.debian.org/status/logs.php?arch=%s&pkg=%s&ver=%s&suite=%s\" target=\"_blank\">%s</a> (relative to testing)" % (quote(arch), quote(src), quote(source_u[VERSION]), base, arch)
 
                 if arch in self.options.fucked_arches:
                     text = text + " (but %s isn't keeping up, so never mind)" % (arch)
@@ -1568,8 +1592,8 @@ class Britney(object):
             oodbins = {}
             uptodatebins = False
             # for every binary package produced by this source in the suite for this architecture
-            for pkg_id in sorted(x for x in source_u[BINARIES] if x[2] == arch):
-                pkg = pkg_id[0]
+            for pkg_id in sorted(x for x in source_u[BINARIES] if x.architecture == arch):
+                pkg = pkg_id.package_name
                 if pkg not in pkgs: pkgs[pkg] = []
                 pkgs[pkg].append(arch)
 
@@ -1606,15 +1630,15 @@ class Britney(object):
                 oodtxt = ""
                 for v in oodbins.keys():
                     if oodtxt: oodtxt = oodtxt + "; "
-                    oodtxt = oodtxt + "%s (from <a href=\"http://buildd.debian.org/status/logs.php?" \
+                    oodtxt = oodtxt + "%s (from <a href=\"https://buildd.debian.org/status/logs.php?" \
                         "arch=%s&pkg=%s&ver=%s\" target=\"_blank\">%s</a>)" % \
                         (", ".join(sorted(oodbins[v])), quote(arch), quote(src), quote(v), v)
                 if uptodatebins:
-                    text = "old binaries left on <a href=\"http://buildd.debian.org/status/logs.php?" \
+                    text = "old binaries left on <a href=\"https://buildd.debian.org/status/logs.php?" \
                         "arch=%s&pkg=%s&ver=%s\" target=\"_blank\">%s</a>: %s" % \
                         (quote(arch), quote(src), quote(source_u[VERSION]), arch, oodtxt)
                 else:
-                    text = "missing build on <a href=\"http://buildd.debian.org/status/logs.php?" \
+                    text = "missing build on <a href=\"https://buildd.debian.org/status/logs.php?" \
                         "arch=%s&pkg=%s&ver=%s\" target=\"_blank\">%s</a>: %s" % \
                         (quote(arch), quote(src), quote(source_u[VERSION]), arch, oodtxt)
 
@@ -1632,7 +1656,8 @@ class Britney(object):
                         update_candidate = False
                         excuse.missing_build_on_arch(arch)
 
-                if 'age' in policy_info and policy_info['age']['current-age']:
+                if 'age' in policy_info and (policy_info['age']['current-age'] or
+                                             not policy_info['age']['age-requirement']):
                     excuse.addhtml(text)
 
         # if the source package has no binaries, set update_candidate to False to block the update
@@ -1766,24 +1791,24 @@ class Britney(object):
                     upgrade_me.append("%s_%s" % (pkg, suite))
 
         # process the `remove' hints, if the given package is not yet in upgrade_me
-        for item in self.hints['remove']:
-            src = item.package
+        for hint in self.hints['remove']:
+            src = hint.package
             if src in upgrade_me: continue
             if ("-"+src) in upgrade_me: continue
             if src not in sources['testing']: continue
 
             # check if the version specified in the hint is the same as the considered package
             tsrcv = sources['testing'][src][VERSION]
-            if tsrcv != item.version:
+            if tsrcv != hint.version:
                 continue
 
             # add the removal of the package to upgrade_me and build a new excuse
             upgrade_me.append("-%s" % (src))
             excuse = Excuse("-%s" % (src))
             excuse.set_vers(tsrcv, None)
-            excuse.addhtml("Removal request by %s" % (item.user))
+            excuse.addhtml("Removal request by %s" % (hint.user))
             excuse.addhtml("Package is broken, will try to remove")
-            excuse.addreason("remove")
+            excuse.add_hint(hint)
             excuses[excuse.name] = excuse
 
         # extract the not considered packages, which are in the excuses but not in upgrade_me
@@ -1879,8 +1904,7 @@ class Britney(object):
             nuninst[arch] = set()
             for pkg_name in binaries[arch][0]:
                 pkgdata = binaries[arch][0][pkg_name]
-                pkg_id = (pkg_name, pkgdata.version, arch)
-                r = inst_tester.is_installable(pkg_id)
+                r = inst_tester.is_installable(pkgdata.pkg_id)
                 if not r:
                     nuninst[arch].add(pkg_name)
 
@@ -2150,17 +2174,17 @@ class Britney(object):
 
                 eqv_table = {}
 
-                for binary, version, parch in rms:
+                for rm_pkg_id in rms:
+                    binary, _, parch = rm_pkg_id
                     key = (binary, parch)
-                    eqv_table[key] = version
+                    eqv_table[key] = rm_pkg_id
 
-                for p1 in updates:
-                    binary, _, parch = p1
+                for new_pkg_id in updates:
+                    binary, _, parch = new_pkg_id
                     key = (binary, parch)
-                    old_version = eqv_table.get(key)
-                    if old_version is not None:
-                        p2 = (binary, old_version, parch)
-                        if inst_tester.are_equivalent(p1, p2):
+                    old_pkg_id = eqv_table.get(key)
+                    if old_pkg_id is not None:
+                        if inst_tester.are_equivalent(new_pkg_id, old_pkg_id):
                             eqv_set.add(key)
 
                 # remove all the binaries which aren't being smooth updated
@@ -2202,8 +2226,7 @@ class Britney(object):
         # updates but not supported as a manual hint
         elif item.package in packages_t[item.architecture][0]:
             binaries_t_a = packages_t[item.architecture][0]
-            version = binaries_t_a[item.package].version
-            pkg_id = (item.package, version, item.architecture)
+            pkg_id = binaries_t_a[item.package].pkg_id
             undo['binaries'][(item.package, item.architecture)] = pkg_id
             affected_pos.update(inst_tester.reverse_dependencies_of(pkg_id))
             del binaries_t_a[item.package]
@@ -2228,8 +2251,7 @@ class Britney(object):
                 # all of its reverse dependencies as affected
                 if binary in binaries_t_a:
                     old_pkg_data = binaries_t_a[binary]
-                    old_version = old_pkg_data.version
-                    old_pkg_id = (binary, old_version, parch)
+                    old_pkg_id = old_pkg_data.pkg_id
                     # save the old binary package
                     undo['binaries'][key] = old_pkg_id
                     if not equivalent_replacement:
@@ -2583,19 +2605,28 @@ class Britney(object):
         self._inst_tester.compute_testing_installability()
         computed_nuninst = self.get_nuninst(build=True)
         if cached_nuninst != computed_nuninst:
+            only_on_break_archs = True
             self.log("==================== NUNINST OUT OF SYNC =========================", type="E")
             for arch in self.options.architectures:
                 expected_nuninst = set(cached_nuninst[arch])
                 actual_nuninst = set(computed_nuninst[arch])
                 false_negatives = actual_nuninst - expected_nuninst
                 false_positives = expected_nuninst - actual_nuninst
+                # Britney does not quite work correctly with
+                # break/fucked arches, so ignore issues there for now.
+                if (false_negatives or false_positives) and arch not in self.options.break_arches:
+                    only_on_break_archs = False
                 if false_negatives:
                     self.log(" %s - unnoticed nuninst: %s" % (arch, str(false_negatives)), type="E")
                 if false_positives:
                     self.log(" %s - invalid nuninst: %s" % (arch, str(false_positives)), type="E")
                 self.log(" %s - actual nuninst: %s" % (arch, str(actual_nuninst)), type="I")
                 self.log("==================== NUNINST OUT OF SYNC =========================", type="E")
-            raise AssertionError("NUNINST OUT OF SYNC")
+            if not only_on_break_archs:
+                raise AssertionError("NUNINST OUT OF SYNC")
+            else:
+                self.log("Nuninst is out of sync on some break arches",
+                         type="W")
 
         self.log("> All non-installability counters are ok", type="I")
 
@@ -2856,27 +2887,30 @@ class Britney(object):
         excuses relationships. If they build a circular dependency, which we already
         know as not-working with the standard do_all algorithm, try to `easy` them.
         """
-        self.log("> Processing hints from the auto hinter",
-                   type="I")
+        self.log("> Processing hints from the auto hinter", type="I")
 
-        # consider only excuses which are valid candidates
-        valid_excuses = frozenset(y.uvname for y in self.upgrade_me)
-        excuses = self.excuses
-        excuses_deps = dict((name, set(excuse.deps)) for name, excuse in excuses.items() if name in valid_excuses)
         sources_t = self.sources['testing']
+        excuses = self.excuses
+
+        # consider only excuses which are valid candidates and still relevant.
+        valid_excuses = frozenset(y.uvname for y in self.upgrade_me
+                                  if y not in sources_t or sources_t[y][VERSION] != excuses[y].ver[1])
+        excuses_deps = {name: valid_excuses.intersection(excuse.deps)
+                        for name, excuse in excuses.items() if name in valid_excuses}
+        excuses_rdeps = defaultdict(set)
+        for name, deps in excuses_deps.items():
+            for dep in deps:
+                excuses_rdeps[dep].add(name)
 
         def find_related(e, hint, circular_first=False):
-            if e not in valid_excuses:
-                return False
             excuse = excuses[e]
-            if e in sources_t and sources_t[e][VERSION] == excuse.ver[1]:
-                return True
             if not circular_first:
                 hint[e] = excuse.ver[1]
             if not excuse.deps:
                 return hint
-            for p in excuse.deps:
-                if p in hint: continue
+            for p in excuses_deps[e]:
+                if p in hint or p not in valid_excuses:
+                    continue
                 if not find_related(p, hint):
                     return False
             return hint
@@ -2887,8 +2921,6 @@ class Britney(object):
         seen_hints = set()
         for e in valid_excuses:
             excuse = excuses[e]
-            if e in sources_t and sources_t[e][VERSION] == excuse.ver[1]:
-                continue
             if excuse.deps:
                 hint = find_related(e, {}, True)
                 if isinstance(hint, dict) and e in hint:
@@ -2905,9 +2937,9 @@ class Britney(object):
 
                 for item, ver in items:
                     # excuses which depend on "item" or are depended on by it
-                    new_items = [(x, excuses[x].ver[1]) for x in valid_excuses if \
-                       (item in excuses_deps[x] or x in excuses_deps[item]) \
-                       and (x, excuses[x].ver[1]) not in seen_items]
+                    new_items = set((x, excuses[x].ver[1]) for x in excuses_deps[item])
+                    new_items.update((x, excuses[x].ver[1]) for x in excuses_rdeps[item])
+                    new_items -= seen_items
                     items.extend(new_items)
                     seen_items.update(new_items)
 

@@ -152,7 +152,7 @@ def undo_changes(lundo, inst_tester, sources, binaries, all_binary_packages,
                 assert binary not in binaries_t_a
                 pkgdata = all_binary_packages[undo['binaries'][p]]
                 binaries_t_a[binary] = pkgdata
-                inst_tester.add_testing_binary((binary, pkgdata.version, arch))
+                inst_tester.add_testing_binary(pkgdata.pkg_id)
 
     # STEP 4
     # undo all changes to virtual packages
@@ -582,7 +582,7 @@ def check_installability(inst_tester, binaries, arch, updates, affected, check_a
     improvement = 0
 
     # broken packages (first round)
-    for pkg_id in (x for x in updates if x[2] == arch):
+    for pkg_id in (x for x in updates if x.architecture == arch):
         name, version, parch = pkg_id
         if name not in packages_t_a:
             continue
@@ -616,7 +616,7 @@ def check_installability(inst_tester, binaries, arch, updates, affected, check_a
         # The early round is sufficient to disprove the situation
         return
 
-    for pkg_id in (x for x in affected if x[2] == arch):
+    for pkg_id in (x for x in affected if x.architecture == arch):
         name, version, parch = pkg_id
         if name not in packages_t_a:
             continue
